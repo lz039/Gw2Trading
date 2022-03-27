@@ -1,0 +1,117 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(httr)
+library(jsonlite)
+library(readr)
+```
+
+
+```{r}
+  cat("Starting function")
+  
+  listings_response <- GET("https://api.guildwars2.com/v2/commerce/listings")
+  all_items <-  content(listings_response, "text") %>% fromJSON()
+  
+  item_list <- NULL
+  price_list_buys <- NULL
+  price_list_sells <- NULL
+  
+  cat(paste("Found ", length(all_items), "items in total"))
+  take <- 2000
+  batch_size <- 20
+  all_items <- all_items %>% head(take)
+  cat(paste("Took ", length(all_items), "items for processing"))
+  
+  # get price lists
+  for (i in 0:(take/batch_size - 1))
+  {
+    rowBatch <- (batch_size*i + 1):(batch_size * (i + 1))
+    currentBatch <- all_items[rowBatch] %>% 
+      paste(collapse = ",")
+   
+    # get price details
+    price_response <- GET(paste("https://api.guildwars2.com/v2/commerce/listings?ids=",
+                                currentBatch,
+                                sep = ""))
+    
+    price_response_n <- content(price_response, "text") %>% fromJSON()
+    
+    # process price_list_buys
+    for (row in 0:nrow(price_response_n))
+    {
+      id <- price_response_n[row, "id"]
+      buy <- price_response_n[row, "buys"]
+    
+      if (length(buy) > 0)
+      {
+        value <- buy[[1]] %>% 
+          as_tibble(.name_repair = "minimal") %>% 
+          mutate(id = id)
+        
+        price_list_buys <- price_list_buys %>% bind_rows(value)
+      }
+    
+    }
+    
+    # process price_list_sells
+    for (row in 0:nrow(price_response_n))
+    {
+      id <- price_response_n[row, "id"]
+      sell <- price_response_n[row, "sells"]
+    
+      if (length(sell) > 0)
+      {
+        value <- sell[[1]] %>% 
+          as_tibble(.name_repair = "minimal") %>% 
+          mutate(id = id)
+        
+        price_list_sells <- price_list_sells %>% bind_rows(value)
+      }
+    }
+    
+    cat(paste("Getting prices, batch ", i + 1, "/", take/batch_size - 1, ".\n"))
+  }
+  
+  for (i in 0:(take/batch_size - 1))
+  {
+    i = 1
+    rowBatch <- (batch_size*i + 1):(batch_size * (i + 1))
+    currentBatch <- all_items[rowBatch] %>% 
+      paste(collapse = ",")
+   
+    # get items details
+    item_response <- GET(paste("https://api.guildwars2.com/v2/items?ids=",
+                               currentBatch,
+                               sep = ""))
+    
+    item_response_n <- content(item_response, "text") %>%
+      fromJSON() %>% 
+      select(any_of(c("name", "description", "type", "rarity",
+                      "vendor_value", "id", "icon"))) %>% 
+      mutate(
+        id = as.integer(id),
+        vendor_value = as.double(vendor_value)
+      )
+    
+    if (is.null(item_list)) {
+      item_list <- item_response_n
+    } else {
+      item_list <- item_list %>% 
+        add_row(item_df)
+    }
+    
+    cat(paste("Getting items, batch ", i + 2, "/", take/batch_size - 1, ".\n"))
+  }
+  
+  item_list_buys <- item_list %>% left_join(price_list_buys)
+  item_list_sells <- item_list %>% left_join(price_list_sells)
+  
+  dir <- getwd()
+  write_csv(item_list_buys, file = paste(dir, "/gw2-all-buys.csv", sep = ""))
+  write_csv(item_list_sells, file = paste(dir, "/gw2-all-sells.csv", sep = ""))
+```
