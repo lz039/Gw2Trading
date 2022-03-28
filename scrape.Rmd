@@ -12,7 +12,7 @@ library(readr)
 
 
 ```{r}
-  cat("Starting function")
+  cat("Starting function.\n")
   
   listings_response <- GET("https://api.guildwars2.com/v2/commerce/listings")
   all_items <-  content(listings_response, "text") %>% fromJSON()
@@ -21,11 +21,11 @@ library(readr)
   price_list_buys <- NULL
   price_list_sells <- NULL
   
-  cat(paste("Found ", length(all_items), "items in total"))
+  cat(paste("Found ", length(all_items), "items in total.\n"))
   take <- 2000
-  batch_size <- 20
+  batch_size <- 100 # higher batch sizes are much better.
   all_items <- all_items %>% head(take)
-  cat(paste("Took ", length(all_items), "items for processing"))
+  cat(paste("Took ", length(all_items), "items for processing.\n"))
   
   # get price lists
   for (i in 0:(take/batch_size - 1))
@@ -74,12 +74,11 @@ library(readr)
       }
     }
     
-    cat(paste("Getting prices, batch ", i + 1, "/", take/batch_size - 1, ".\n"))
+    cat(paste("Getting prices, batch ", i + 1, "/", take/batch_size, ".\n"))
   }
   
   for (i in 0:(take/batch_size - 1))
   {
-    i = 1
     rowBatch <- (batch_size*i + 1):(batch_size * (i + 1))
     currentBatch <- all_items[rowBatch] %>% 
       paste(collapse = ",")
@@ -105,7 +104,7 @@ library(readr)
         add_row(item_df)
     }
     
-    cat(paste("Getting items, batch ", i + 2, "/", take/batch_size - 1, ".\n"))
+    cat(paste("Getting items, batch ", i + 1, "/", take/batch_size, ".\n"))
   }
   
   item_list_buys <- item_list %>% left_join(price_list_buys)

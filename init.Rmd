@@ -1,14 +1,48 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 library(tidyverse)
 library(readr)
 
 library(ggplot2)
 ```
+
+# Insight in the economy of an Massively Multiplayer Online Role-Playing Game using the example of Guild Wars 2
+
+
+## What is Guild Wars 2
+
+bla bla some text
+
+## Why have a look at the economy?
+
+bla bla some text
+
+## How does the action house work?
+
+bla bla some text
+
+
+## Getting started
+
+### Acquire data
+
+#### Guild Wars API
+
+
+https://wiki.guildwars2.com/wiki/API:Main
+
+some text here and reference to scrape.Rmd
+
+#### Overview
+
+Load the data from CSV. 
+We don't want to get that amount of data from the API again and again.
 
 ```{r}
 dir <- getwd()
@@ -16,43 +50,181 @@ item_list_buys <- read.csv(paste(dir, "/gw2-all-buys.csv", sep = ""))
 item_list_sells <- read.csv(paste(dir, "/gw2-all-sells.csv", sep = ""))
 ```
 
+To get a quick impressions of the data, let's have a look at the rough numbers.
+
+This is how the buyer data looks like:
+```{r}
+glimpse(item_list_buys)
+```
+
+The seller data has the same structure, just for all the sells. 
+```{r}
+glimpse(item_list_sells)
+```
+
+- Name: This is the name of the item.
+- Description: Some items also have a description giving further information.
+- Type: can be something like `armor`, `consumable`, `crafting material` and so on
+- Rarity: There are 8 types of rarity from very common to very rare.
+- Vendor_value: What a sell to a NPC dealer would yield.
+- Id: Unique ID of the item.
+- Icon: URL to a picture of the item
+- Listings: How many players are offering this item to this price
+- Unit_Price: What the player wants for this item (in copper)
+- Quantity: How many offers of this items there are for this price.
+
+Listings, Unit_Price and Quantity can be read together.
+
+E.g. for the first data entry:
+
+- There is 1 (`listings`) player 
+- offering 17 (`quantity`) pieces of this item 
+- for 168 (`unit_price`) copper each.
+
+We'll learn more about copper shortly.
+
+
+Compare total items of **all** buys and sells:
 
 ```{r}
 nrow(item_list_buys)
+nrow(item_list_sells)
+```
+
+Compare **unique** items of buys and sells:
+
+```{r}
 item_list_buys %>% 
   select(name) %>% 
   drop_na() %>% 
   unique() %>% 
-  count()
+  count() %>% 
+  first()
 
-nrow(item_list_sells)
 item_list_sells %>% 
   select(name) %>% 
   drop_na() %>% 
   unique() %>% 
-  count()
+  count() %>% 
+  first()
 ```
 
-We need to divide with 10.000 to display price in gold.
-10.000 copper == 100 silver == 1 gold.
+## Currency
 
-```{r}
+![coin](images/coin.png)
+
+Just like in the real world, where 100 cents are 1 Euro, 
+the main currency in Guild Wars, coins, are separated into three units.
+
+There is copper, silver and gold. All those values are the same and are automatically calculated by the game.
+
+`
+10.000 copper == 100 silver == 1 gold.
+`
+
+So we need to divide all values by `10.000` to display the price in gold, which is good for expensive goods and when we are searching for the upper prices.
+
+There may be occasions where it makes more sense to look for silver or even copper.
+
+
+### Filter items for expensive goods and display them:
+
+Vendor prices are so low (copper range), that they appear as nearly zero in this chart.
+If possible, it's always better to sell items on the action house instead of the vendor.
+
+```{r message=FALSE, warning=FALSE}
 item_list_sells_group <- item_list_sells %>% 
   group_by(name) %>% 
-  summarise(unit_price = mean(unit_price), 
-            vendor_value = mean(vendor_value),
+  summarise(unit_price = mean(unit_price) / 10000, 
+            vendor_value = mean(vendor_value) / 10000,
             type = unique(type),
-            rarity = unique(rarity))
+            rarity = unique(rarity)) %>% 
+  filter(unit_price > 5) %>% 
+  arrange(desc(unit_price))
 
 item_list_sells_group %>% 
   ggplot() +
-  geom_bar(aes(x = name, y = unit_price / 10000, fill = rarity), stat="identity") +
-  geom_point(aes(x = name, y = vendor_value / 10000), fill = "#000000", stat="identity") +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  geom_bar(aes(x = name, y = unit_price, fill = rarity), stat="identity") +
+  geom_point(aes(x = name, y = vendor_value), fill = "#000000", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  scale_x_discrete(limits = item_list_sells_group$name)
+  # geom_text(aes(label=vendor_value, x=name, y=vendor_value), hjust=0, vjust=0)
+
+```
+
+We'll come back to items and their value in much more detail later.
+
+
+## The rarity of items
+
+There are different rarities in Guild Wars that suggest how often this item will occur in the game:
+
+```{r message=FALSE, warning=FALSE}
+rarities <- 
+  c("Junk", "Basic", "Fine", "Masterwork", "Rare", "Exotic", "Ascended", "Legendary")
+
+colors <- 
+  c("Junk" = "#a3aeb9",
+    "Basic" = "#000000",
+    "Fine" = "#6a9cd9", 
+    "Masterwork" = "#17911a", 
+    "Rare" = "#f0cd25",
+    "Exotic" = "#e9ad1a",
+    "Ascended" = "#e64680",
+    "Legendary" = "#53238a")
+
+df <- data.frame(rarities)
+
+df %>% 
+  ggplot() +
+  geom_bar(aes(x = rarities, fill = rarities)) +
+  scale_x_discrete(limits = rarities) +
+  scale_fill_manual("Rarity", values = colors)
+```
+
+What is obvious by the names, rarity on the left is in general more common than rarity on the right.
+
+One important information is that a lot of very rare items (`Ascended` and `Legendary`) can't be sold to other players. That's the reason we may see more `Rare` and `Exotic` items being sold for high prices than those really rare ones.
+
+In our dataset, we have the following distribution:
+
+```{r}
+df <- item_list_sells %>% 
+  count(rarity) %>% 
+  arrange(desc(n))
+
+df %>% 
+  ggplot() +
+  geom_bar(aes(x = rarity, y = n, fill = rarity), stat='identity') +
+  scale_x_discrete(limits = rarities) +
+  scale_fill_manual("Rarity", values = colors)
+```
+
+## Types
+
+bla bla more text
+
+```{r}
+df <- item_list_sells %>% 
+  count(type) %>% 
+  arrange(desc(n))
+
+df %>% 
+  ggplot() +
+  geom_bar(aes(x = type, y = n, fill = type), stat='identity') 
+```
+
+.................
+
+
+
+Search for outliers:
+
+```{r}
 
 # render boxplot with outliers
 item_list_sells %>% 
-ggplot(aes(x = factor(rarity), y = unit_price / 10000, fill = factor(type))) + 
+ggplot(aes(x = factor(rarity), y = unit_price, fill = factor(type))) + 
   geom_boxplot() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 ```
