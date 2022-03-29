@@ -14,18 +14,55 @@ library(ggplot2)
 
 # Insight in the economy of an Massively Multiplayer Online Role-Playing Game using the example of Guild Wars 2
 
+Using the data science lifecycle of **plan**, **data**, **model** and **deployment**, I want to provide insights into many aspects of data science, programming in R and the world of the online game Guild Wars 2.
 
-## What is Guild Wars 2
+[data science lifecycle]("images/lifecycle.png")
 
-bla bla some text
+## Intro
 
-## Why have a look at the economy?
+Malcolm Forbes once said, "Money isn't everything as long as you have enough of it".
+Sure, money doesn't buy happiness, but it can buy a lot of things. This is not only true for the real world, but especially in online games, where micro transactions and payed services have become the new normal. 
 
-bla bla some text
+More and more games give you the choice to invest a lot of time *or* a lot of money. Both ways you'll somehow achieve the goal of the game faster. In some games you can even exchange digital goods for real money.
 
-## How does the action house work?
+To get to the point, having digital currency in games can save you time, stress and even real money.
 
-bla bla some text
+There are multiple ways to earn money in games.
+Often you'll get on with just playing the game and getting some money from enemies, but for buying the *good* stuff, one needs a lot more money. 
+
+One way may be farming, which means hunting special items in high amounts and selling them to other players. Here's the question, which items are worth collecting and can be sold for which prices?
+
+Another way is buying items from other players and reselling them with a higher price tag, just like in the real world.
+Many games have auction houses where those transactions can be made. For this type of income one needs to know what to buy when, which prices are low or high, and when to sell for which amount.
+
+For this project my example of game will be Guild Wars 2. Guild Wars 2 was published in 2012 by NCSoft. There are no monthly fees and the basic game is free to play since 2015. It is a massively multiplayer online role-playing game, meaning a lot of people playing in parallel in an online world. There are over 20.000 items that can be collected and many of them can be sold and bought at the auction house, called the trading post.
+
+[trading post]("images/Trading_Post_home.jpg")
+
+This is a picture of the auction house. There are many different types of items (Armor, Weapons, ...)
+
+To make one thing clear, there are already a lot of web pages offering this or similar kind of services like [GW2Efficiency](https://gw2efficiency.com/tradingpost) or [GW2TP](https://de.gw2tp.com/). 
+This should only be a fun project exploring the R language, data science and the Guild Wars API.
+
+## Identify variables
+
+For making the most out of our data, we can try to identify some important variables.
+
+1. For buying low and selling high, we need to know everything about the `prices` like average, mean and quantiles.
+2. Where is the highest `difference` between buy and sell `prices`?
+2. Are there any `outliers` that are must-buys?
+3. What is the `quantity` of items on the market? 
+4. Are there any special `times` when people buy/sell?
+5. Investing in one item, what is the `return of investment (ROI)`?
+
+
+## Metrics
+
+Currently I'm really inexperienced with the auction market. I just buy the items I need.
+
+The goal is to earn at least `18 gold and 6 silver` just by buying/selling items that the exploration/model identifiers as highest ROI.
+This is the current values of `1$`.
+
 
 
 ## Getting started
