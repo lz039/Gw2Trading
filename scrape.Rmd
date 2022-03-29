@@ -10,6 +10,7 @@ library(jsonlite)
 library(readr)
 ```
 
+Is it better to have this as script?
 
 ```{r}
   cat("Starting function.\n")
