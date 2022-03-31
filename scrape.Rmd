@@ -127,3 +127,21 @@ Is it better to have this as script?
   write_csv(item_list_buys, file = paste(dir, "/gw2-all-buys.csv", sep = ""))
   write_csv(item_list_sells, file = paste(dir, "/gw2-all-sells.csv", sep = ""))
 ```
+
+
+Create full lists by raw csvs
+
+```{r}
+dir <- getwd()
+price_list_buys <- read.csv(paste(dir, "/gw2-all-buys-raw-3103.csv", sep = ""))
+price_list_sells <- read.csv(paste(dir, "/gw2-all-sells-raw-3103.csv", sep = ""))
+item_list <- read.csv(paste(dir, "/gw2-all-items-raw-3103.csv", sep = ""))
+
+item_list_buys <- item_list %>% left_join(price_list_buys)
+item_list_sells <- item_list %>% left_join(price_list_sells)
+  
+write_csv(item_list_buys, file = paste(dir, "/gw2-all-buys.csv", sep = ""))
+write_csv(item_list_sells, file = paste(dir, "/gw2-all-sells.csv", sep = ""))
+
+```
+

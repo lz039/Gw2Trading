@@ -8,11 +8,17 @@ output:
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
 library(readr)
+library(scales)
 
 library(ggplot2)
 library(gt)
 library(gtable)
+library(DT)
 ```
+# todo
+- get more structure with headings
+- clean dataset at the beginning and create some default objects (like prices in gold)
+
 
 # Insight in the economy of an Massively Multiplayer Online Role-Playing Game using the example of Guild Wars 2
 
@@ -77,12 +83,27 @@ This is the current values of `1$`.
 
 #### Guild Wars API
 
+The data we need can be fetched from a REST API at https://api.guildwars2.com.
+There is also a good [documentation](https://wiki.guildwars2.com/wiki/API:Main) on how to use the API.
 
-https://wiki.guildwars2.com/wiki/API:Main
+We'll use three endpoint here:
+1. Get all items there are in the game
 
-some text here and reference to scrape.Rmd
+For each item:
 
-#### Overview
+2.Get selling and buying listings from auction house api
+3. Get basic information about the item like name, rarity etc.
+
+At the end we can merge all this data to get a good overview of which items are sold/bought at the auction house.
+When joining all this together, we get a huge dataset of:
+- nearly `30.000 items`
+- around `500.000 buy auctions (orders)` 
+- over `4.300.000 sell auctions (offers)`.
+
+There are also APIs where authorization is needed to get information about one's user profile, but we won't need this data for this analysis.
+
+
+#### Data Overview
 
 Load the data from CSV. 
 We don't want to get that amount of data from the API again and again.
@@ -100,7 +121,7 @@ This is how the buyer data looks like:
 glimpse(item_list_buys)
 ```
 
-The seller data has the same structure, just for all the sells. 
+The seller data has the same structure, just for all the offers: 
 ```{r}
 glimpse(item_list_sells)
 ```
@@ -170,9 +191,14 @@ So we need to divide all values by `10.000` to display the price in gold, which 
 There may be occasions where it makes more sense to look for silver or even copper.
 
 
-### Filter items for expensive goods and display them:
+### Filter for most expensive goods and display them:
 
-9999 gold seems to be the maximum price of an item.
+9999 gold seems to be the maximum possible price of an auction.
+Our top item here, the `Festive Grymm Svaard`, is a cosmetic item that can only be bought with real money and lot of luck.
+
+Well this is only an offer, so we'll have to find out if anyone ever bought this item to this price.
+
+
 
 ```{r message=FALSE, warning=FALSE}
 item_list_sells_group <- item_list_sells %>% 
@@ -191,8 +217,31 @@ top5 %>%
   geom_point(aes(x = name, y = vendor_value), fill = "#000000", stat="identity") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   scale_x_discrete(limits = top5$name)
-
 ```
+
+As we can see, the highest order on this item is 300 gold. 
+That's pretty much, but far away from 9999.
+
+But who doesn't want to look that fancy.
+Cordyceps
+![Festive Grymm Svaard](images/Festive_Grymm_Svaard.jpg)
+
+```{r}
+
+item_list_buys %>% 
+  filter(name == 'Festive Grymm Svaard') %>% 
+  mutate(unit_price_gold = unit_price / 10000) %>%
+  select(name, unit_price_gold) %>% 
+  top_n(5) %>% 
+  arrange(desc((unit_price_gold))) %>% 
+  gt(rowname_col = "name") %>%
+  tab_header(title = "Orders of the Festive Grymm Svaard") %>%
+  fmt_number(
+    columns = unit_price_gold,
+    suffixing = "G"
+  )
+```
+
 
 Vendor prices are so low (copper range), that they appear as nearly zero in this chart.
 
@@ -233,7 +282,8 @@ df %>%
 
 What is obvious by the names, rarity on the left is in general more common than rarity on the right.
 
-One important information is that a lot of very rare items (`Ascended` and `Legendary`) can't be sold to other players. That's the reason we may see more `Rare` and `Exotic` items being sold for high prices than those really rare ones.
+One important information is that a lot of very rare items (`Ascended` and `Legendary`) can't be sold to other players. That's the reason we see much more `Rare` and `Exotic` items being sold for high prices than those really rare ones.
+Junk is zero because it can only be sold at non-player vendors.
 
 In our dataset, we have the following distribution:
 
@@ -251,10 +301,17 @@ df %>%
 
 ## Types
 
-bla bla more text
+There are a lot of different types of items.
+As we can see, Armor, Consumables and Weapons are the most common items.
+
+Here we only see the distribution of items in the game. There are no numbers about sells yet.
+
+This means there are very many different weapon, consumable and armor items in the game, but not that many different crafting materials and upgrade components which seems reasonable.
 
 ```{r}
 df <- item_list_sells %>% 
+  distinct(type, name) %>%
+  group_by(type) %>% 
   count(type)
 
 df %>% 
@@ -263,45 +320,34 @@ df %>%
   theme(axis.text.x = element_text(angle = 45, hjust=1))
 ```
 
+We can see some funny types like **Quux** and **Qux**, which is used among developers for arbitrary variables. As we can see, there are only 23 items of this type (that can be sold) and have special use-cases in the game. 
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 
 item_list_sells %>%
-  filter(type == "CraftingMaterial") %>% 
-  group_by(rarity, name) %>%
-  summarize(
-    mean_price = mean(unit_price / 10000),
-    sum_quantity = sum(as.double(listings) * as.double(quantity)),
-    picture = web_image(unique(icon), height = 25)
-  ) %>% 
-  arrange(desc(sum_quantity)) %>%
+ filter(type %in% c("Quux", "Qux")) %>%
+  group_by(type, rarity) %>% 
+  summarise(name = unique(name),
+            mean = mean(unit_price / 1000),
+            icon = unique(web_image(icon, height = 50))) %>% 
+  arrange(desc(mean)) %>%
   gt(rowname_col = "name") %>%
-  tab_header(title = "Items being sold", subtitle = "Mean costs and sum of occurrences") %>%
+  tab_header(title = "Quux and Qux", subtitle = "Items with special means") %>%
   fmt_number(
-    columns = mean_price,
+    columns = mean,
     suffixing = "G"
   ) %>% 
-  fmt_number(
-    columns = sum_quantity,
-    decimals = 0,
-    use_seps = TRUE
-  ) %>% 
   fmt_markdown(
-    columns = picture
+    columns = icon
   ) %>% 
   summary_rows(
-    columns = mean_price,
-    fns = list(TOTAL = "sum"),
-    formatter = fmt_number
-  ) %>%
-   summary_rows(
-    columns = sum_quantity,
+    columns = mean,
     fns = list(TOTAL = "sum"),
     formatter = fmt_number
   ) %>%
    tab_footnote(
     footnote = "Prices in gold",
-    locations = cells_column_labels(columns = mean_price)
+    locations = cells_column_labels(columns = mean)
   ) %>%
   tab_source_note(
     "Based on data from api.guildwars2.com"
@@ -309,13 +355,145 @@ item_list_sells %>%
   tab_options(
     summary_row.background.color = "#ACEACE",
     row_group.background.color = "#FFEFDB",
-    container.width = pct(100),
-    container.height = px(250),
     table.layout = "auto"
   )
 ```
 
-.................
+### Outliers on Crafting Material
+
+Let's have a closer look on one of the most important resources in the game: Crafting material.
+
+The base material can be collected everywhere in the world from trees, stones or herbs.
+As a player, you can learn up to two professions that can improve those base materials to something better and useful.
+
+Let's first check if there are any outlers in the data that we should clean.
+
+```{r}
+mean_price_crafting_sells <- item_list_sells %>% 
+  filter(type == "CraftingMaterial") %>%
+  mutate(unit_price_gold = unit_price / 10000)
+
+mean_price_crafting_buys <- item_list_buys %>% 
+  filter(type == "CraftingMaterial") %>%
+  mutate(unit_price_gold = unit_price / 10000)
+
+ggplot() +  
+  geom_boxplot(data = mean_price_crafting_sells, aes(x = 'Sells', y = unit_price_gold)) +
+  geom_boxplot(data = mean_price_crafting_buys, aes(x = 'Buys', y = unit_price_gold)) +
+  geom_hline(yintercept = 999, linetype="dashed", color = "red") +
+  scale_y_continuous(labels = comma)
+
+```
+
+We can see that on the buys, there aren't any outliers because the `human brain` is still working and no one buys overpriced goods.
+On the other hand, on the sells there are some people who are exaggerating with the prices.
+Let's strip everything at 1000 and above.
+
+
+```{r message=FALSE, warning=FALSE}
+
+df_crafting_material <-  item_list_sells %>% 
+  filter(type == "CraftingMaterial",
+         unit_price < 1000) %>% 
+  group_by(rarity, name) %>% 
+   summarize(
+    mean_price = mean(unit_price / 10000),
+    sum_quantity = sum(as.double(listings) * as.double(quantity)),
+    picture = web_image(unique(icon), height = 25)
+  ) %>% 
+  mutate(
+    quantity_label = label_number_si(accuracy=0.1)(sum_quantity),
+    mean_price_gold = round(mean_price, digits = 3)) %>% 
+  arrange(desc(sum_quantity)) %>% 
+  select(rarity, name, mean_price_gold, quantity_label, sum_quantity, picture)
+
+df_crafting_material %>% 
+  datatable(extensions = c('ColReorder', 'Buttons', 'Responsive', 'Scroller'),
+            options = list(colReorder = TRUE,
+                           dom = 'Bfrtip', 
+                           buttons = list('copy', list(
+                                           extend = 'collection',
+                                           buttons = c('csv', 'excel', 'pdf'), 
+                                           text = 'Download'))),
+            escape = FALSE,
+            colnames=c("#", "Rarity", "Name", "Mean price in gold", "Quantity (short)", "Quantity", "Icon")
+            )
+
+exp_sold_item_name <- df_crafting_material %>% 
+  arrange(desc(mean_price_gold)) %>% 
+  ungroup() %>%
+  select(name) %>% 
+  first() %>% 
+  first()
+
+```
+
+Looking at Crafting Material, we first see that there is an overwhelming amount of offers on the market.
+There are `r df_crafting_material$quantity_label[[1]]` items of `r df_crafting_material$name[[1]]`!
+**Nougat Center**, **Chattering Skull** and **Plastic Fangs** are all Halloween Event items and therefore not hard to get but also not very useful.
+
+The first real crafting material is `Large Claw`, with still over 
+`r df_crafting_material %>%  filter(name == 'Large Claw') %>% ungroup() %>%  select(quantity_label) %>% first()` items.
+
+The most expensive mean crafting material is `r exp_sold_item_name`.
+
+### Material with the highest profit
+
+First of all, we need to define how many items we want to buy and sell in one batch.
+Because supply and demand are very different and the price fluctuates for each listing, it makes more sense to set a reasonable default first.
+
+Let's try with 50 items.
+
+```{r}
+
+items_to_buy <- 50
+
+## Take 50 from listings * quantity for each row
+## compare with same item on sells
+## ...
+
+unit_price_sells <- item_list_sells %>%
+  mutate(quantity_all = listings * quantity)
+  mutate(unit_price_gold_sells = unit_price / 10000)
+
+unit_price_buys <- item_list_buys %>%
+  mutate(unit_price_gold = unit_price / 10000)
+
+available <- unit_price_sells %>% 
+  mutate(amount = listings * quantity) %>% 
+  summarise(sum = sum(amount)) %>% 
+  first()
+
+requested <- unit_price_buys %>% 
+  mutate(amount = listings * quantity) %>% 
+  summarise(sum = sum(amount)) %>% 
+  first()
+
+cost_sell <- unit_price_sells %>% 
+  select(unit_price_gold) %>% 
+  first() %>%
+  first() * 0.95
+
+cost_buy <- unit_price_buys %>% select(unit_price_gold) %>% 
+  first() %>%
+  first() * 0.95
+
+win <- cost_buy - cost_sell
+
+profit <- win * available
+profit_possible <- win * requested
+init_costs <- available * cost_buy
+```
+
+When buying and selling the item **`r exp_sold_item_name`** in category **CraftingMaterial** with the highest **mean price** on sell, the earning is **`r win`** per unit. 
+
+There are currently **`r requested`** requested items and **`r available`** available.
+
+This may be a profit of **`r profit` gold** (after taxes).
+This would initially cost us **`r init_costs` gold**.
+
+If we would have more of this item, we could even make **`r format(profit_possible, scientific=F)` gold**.
+
 
 
 
