@@ -10,13 +10,15 @@ library(tidyverse)
 library(readr)
 
 library(ggplot2)
+library(gt)
+library(gtable)
 ```
 
 # Insight in the economy of an Massively Multiplayer Online Role-Playing Game using the example of Guild Wars 2
 
 Using the data science lifecycle of **plan**, **data**, **model** and **deployment**, I want to provide insights into many aspects of data science, programming in R and the world of the online game Guild Wars 2.
 
-[data science lifecycle]("images/lifecycle.png")
+[data science lifecycle](images/lifecycle.png)
 
 ## Intro
 
@@ -37,12 +39,18 @@ Many games have auction houses where those transactions can be made. For this ty
 
 For this project my example of game will be Guild Wars 2. Guild Wars 2 was published in 2012 by NCSoft. There are no monthly fees and the basic game is free to play since 2015. It is a massively multiplayer online role-playing game, meaning a lot of people playing in parallel in an online world. There are over 20.000 items that can be collected and many of them can be sold and bought at the auction house, called the trading post.
 
-[trading post]("images/Trading_Post_home.jpg")
+[trading post](images/Trading_Post_home.jpg)
 
 This is a picture of the auction house. There are many different types of items (Armor, Weapons, ...)
 
+When selling items, 5% of the cost is a fee for the auction house.
+When buying items, also 5% of the price goes to the bank.
+Because of that it's important to find items where the buy-to-sell price ratio is the highest.
+
+Buying and selling items this way is called `flipping items` in Guild Wars speech.
+
 To make one thing clear, there are already a lot of web pages offering this or similar kind of services like [GW2Efficiency](https://gw2efficiency.com/tradingpost) or [GW2TP](https://de.gw2tp.com/). 
-This should only be a fun project exploring the R language, data science and the Guild Wars API.
+This should only be a fun project exploring the R language and data science in general.
 
 ## Identify variables
 
@@ -60,10 +68,8 @@ For making the most out of our data, we can try to identify some important varia
 
 Currently I'm really inexperienced with the auction market. I just buy the items I need.
 
-The goal is to earn at least `18 gold and 6 silver` just by buying/selling items that the exploration/model identifiers as highest ROI.
+The goal is to earn at least `18 gold and 6 silver` just by buying/selling items that the exploration/model rates as highest ROI.
 This is the current values of `1$`.
-
-
 
 ## Getting started
 
@@ -166,8 +172,7 @@ There may be occasions where it makes more sense to look for silver or even copp
 
 ### Filter items for expensive goods and display them:
 
-Vendor prices are so low (copper range), that they appear as nearly zero in this chart.
-If possible, it's always better to sell items on the action house instead of the vendor.
+9999 gold seems to be the maximum price of an item.
 
 ```{r message=FALSE, warning=FALSE}
 item_list_sells_group <- item_list_sells %>% 
@@ -176,18 +181,22 @@ item_list_sells_group <- item_list_sells %>%
             vendor_value = mean(vendor_value) / 10000,
             type = unique(type),
             rarity = unique(rarity)) %>% 
-  filter(unit_price > 5) %>% 
   arrange(desc(unit_price))
 
-item_list_sells_group %>% 
+top5 <- top_n(ungroup(item_list_sells_group), 5, unit_price)
+
+top5 %>% 
   ggplot() +
   geom_bar(aes(x = name, y = unit_price, fill = rarity), stat="identity") +
   geom_point(aes(x = name, y = vendor_value), fill = "#000000", stat="identity") +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
-  scale_x_discrete(limits = item_list_sells_group$name)
-  # geom_text(aes(label=vendor_value, x=name, y=vendor_value), hjust=0, vjust=0)
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_x_discrete(limits = top5$name)
 
 ```
+
+Vendor prices are so low (copper range), that they appear as nearly zero in this chart.
+
+> If possible, it's always better to sell items on the action house instead of the vendor.
 
 We'll come back to items and their value in much more detail later.
 
@@ -216,7 +225,10 @@ df %>%
   ggplot() +
   geom_bar(aes(x = rarities, fill = rarities)) +
   scale_x_discrete(limits = rarities) +
-  scale_fill_manual("Rarity", values = colors)
+  scale_fill_manual("Rarity", values = colors) + 
+  theme(axis.text.y=element_blank(),
+        axis.title.y=element_blank(),
+        axis.title.x=element_blank())
 ```
 
 What is obvious by the names, rarity on the left is in general more common than rarity on the right.
@@ -243,12 +255,64 @@ bla bla more text
 
 ```{r}
 df <- item_list_sells %>% 
-  count(type) %>% 
-  arrange(desc(n))
+  count(type)
 
 df %>% 
   ggplot() +
-  geom_bar(aes(x = type, y = n, fill = type), stat='identity') 
+  geom_bar(aes(x = type, y = n, fill = type), stat='identity') +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+```
+
+
+```{r}
+
+item_list_sells %>%
+  filter(type == "CraftingMaterial") %>% 
+  group_by(rarity, name) %>%
+  summarize(
+    mean_price = mean(unit_price / 10000),
+    sum_quantity = sum(as.double(listings) * as.double(quantity)),
+    picture = web_image(unique(icon), height = 25)
+  ) %>% 
+  arrange(desc(sum_quantity)) %>%
+  gt(rowname_col = "name") %>%
+  tab_header(title = "Items being sold", subtitle = "Mean costs and sum of occurrences") %>%
+  fmt_number(
+    columns = mean_price,
+    suffixing = "G"
+  ) %>% 
+  fmt_number(
+    columns = sum_quantity,
+    decimals = 0,
+    use_seps = TRUE
+  ) %>% 
+  fmt_markdown(
+    columns = picture
+  ) %>% 
+  summary_rows(
+    columns = mean_price,
+    fns = list(TOTAL = "sum"),
+    formatter = fmt_number
+  ) %>%
+   summary_rows(
+    columns = sum_quantity,
+    fns = list(TOTAL = "sum"),
+    formatter = fmt_number
+  ) %>%
+   tab_footnote(
+    footnote = "Prices in gold",
+    locations = cells_column_labels(columns = mean_price)
+  ) %>%
+  tab_source_note(
+    "Based on data from api.guildwars2.com"
+  ) %>% 
+  tab_options(
+    summary_row.background.color = "#ACEACE",
+    row_group.background.color = "#FFEFDB",
+    container.width = pct(100),
+    container.height = px(250),
+    table.layout = "auto"
+  )
 ```
 
 .................

@@ -23,9 +23,9 @@ Is it better to have this as script?
   price_list_sells <- NULL
   
   cat(paste("Found ", length(all_items), "items in total.\n"))
-  take <- 2000
-  batch_size <- 100 # higher batch sizes are much better.
-  all_items <- all_items %>% head(take)
+  take <- 26800
+  batch_size <- 200 # higher batch sizes are much better. 200 is the maximum.
+  #all_items <- all_items %>% head(take)
   cat(paste("Took ", length(all_items), "items for processing.\n"))
   
   # get price lists
@@ -39,6 +39,14 @@ Is it better to have this as script?
     price_response <- GET(paste("https://api.guildwars2.com/v2/commerce/listings?ids=",
                                 currentBatch,
                                 sep = ""))
+    
+    if (item_response$status_code != "200" || str_starts(content(price_response, "text"), "<html>"))
+    {
+      cat(paste("Error getting prices in batch ", i, ":", price_response$status_code, 
+                " :: ", price_response, ".\n"))
+      
+      next
+    }
     
     price_response_n <- content(price_response, "text") %>% fromJSON()
     
@@ -102,7 +110,7 @@ Is it better to have this as script?
       item_list <- item_response_n
     } else {
       item_list <- item_list %>% 
-        add_row(item_df)
+        add_row(item_response_n)
     }
     
     cat(paste("Getting items, batch ", i + 1, "/", take/batch_size, ".\n"))
@@ -112,6 +120,9 @@ Is it better to have this as script?
   item_list_sells <- item_list %>% left_join(price_list_sells)
   
   dir <- getwd()
+  #write_csv(price_list_buys, file = paste(dir, "/gw2-all-buys-raw-3103.csv", sep = ""))
+  #write_csv(price_list_sells, file = paste(dir, "/gw2-all-sells-raw-3103.csv", sep = ""))
+  
   write_csv(item_list_buys, file = paste(dir, "/gw2-all-buys.csv", sep = ""))
   write_csv(item_list_sells, file = paste(dir, "/gw2-all-sells.csv", sep = ""))
 ```
