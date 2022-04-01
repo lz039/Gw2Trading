@@ -40,7 +40,7 @@ Is it better to have this as script?
                                 currentBatch,
                                 sep = ""))
     
-    if (item_response$status_code != "200" || str_starts(content(price_response, "text"), "<html>"))
+    if (price_response$status_code != "200" || str_starts(content(price_response, "text"), "<html>"))
     {
       cat(paste("Error getting prices in batch ", i, ":", price_response$status_code, 
                 " :: ", price_response, ".\n"))
@@ -100,7 +100,7 @@ Is it better to have this as script?
     item_response_n <- content(item_response, "text") %>%
       fromJSON() %>% 
       select(any_of(c("name", "description", "type", "rarity",
-                      "vendor_value", "id", "icon"))) %>% 
+                      "vendor_value", "id", "icon", "level", "flags", "details"))) %>% 
       mutate(
         id = as.integer(id),
         vendor_value = as.double(vendor_value)
@@ -116,16 +116,25 @@ Is it better to have this as script?
     cat(paste("Getting items, batch ", i + 1, "/", take/batch_size, ".\n"))
   }
   
+  item_list <- item_list %>% 
+    mutate(
+      item_type = item_list[["details"]][["type"]],
+      item_weight_class = item_list[["details"]][["weight_class"]],
+           ) %>% 
+    select(-details, -flags, -description)
+ 
+# Filter non-sellable items 
+#  item_list %>% 
+#    mutate(flags_flat = any(flags == "SoulbindOnAcquire"))
+  
+  
+  
   dir <- getwd()
-  #write_csv(price_list_buys, file = paste(dir, "/gw2-all-buys-raw-3103.csv", sep = ""))
-  #write_csv(price_list_sells, file = paste(dir, "/gw2-all-sells-raw-3103.csv", sep = ""))
-  #write_csv(item_list, file = paste(dir, "/gw2-all-items-raw-3103.csv", sep = ""))
+  date <- Sys.Date()
   
-  item_list_buys <- item_list %>% left_join(price_list_buys)
-  item_list_sells <- item_list %>% left_join(price_list_sells)
-  
-  write_csv(item_list_buys, file = paste(dir, "/gw2-all-buys.csv", sep = ""))
-  write_csv(item_list_sells, file = paste(dir, "/gw2-all-sells.csv", sep = ""))
+  write_csv(price_list_buys, file = paste(dir, "/gw2-all-buys-raw-", date, ".csv", sep = ""))
+  write_csv(price_list_sells, file = paste(dir, "/gw2-all-sells-raw-", date, ".csv", sep = ""))
+  write_csv(item_list, file = paste(dir, "/gw2-all-items-raw-", date, ".csv", sep = ""))
 ```
 
 
@@ -133,15 +142,15 @@ Create full lists by raw csvs
 
 ```{r}
 dir <- getwd()
-price_list_buys <- read.csv(paste(dir, "/gw2-all-buys-raw-3103.csv", sep = ""))
-price_list_sells <- read.csv(paste(dir, "/gw2-all-sells-raw-3103.csv", sep = ""))
-item_list <- read.csv(paste(dir, "/gw2-all-items-raw-3103.csv", sep = ""))
+date <- "2022-04-01"
+
+price_list_buys <- read.csv(paste(dir, "/gw2-all-buys-raw-", date, ".csv", sep = ""))
+price_list_sells <- read.csv(paste(dir, "/gw2-all-sells-raw-", date, ".csv", sep = ""))
+item_list <- read.csv(paste(dir, "/gw2-all-items-raw-", date, ".csv", sep = ""))
 
 item_list_buys <- item_list %>% left_join(price_list_buys)
 item_list_sells <- item_list %>% left_join(price_list_sells)
   
-write_csv(item_list_buys, file = paste(dir, "/gw2-all-buys.csv", sep = ""))
-write_csv(item_list_sells, file = paste(dir, "/gw2-all-sells.csv", sep = ""))
-
+rm(dir)
 ```
 
