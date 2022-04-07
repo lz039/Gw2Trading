@@ -5,6 +5,7 @@ params:
  institute: "HdM Stuttgart"
  country: "Germany"
  year: "2022"
+ data_date: "2022-04-01"
 output:
  html_document: 
   css: style.css # define your own css
@@ -34,9 +35,11 @@ library(DT)
 ```
 # TODOs
 
+
+
 Using the data science lifecycle of **plan**, **data**, **model** and **deployment**, I want to provide insights into many aspects of data science, programming in R and the world of the online game Guild Wars 2.
 
-[data science lifecycle](images/lifecycle.png)
+![Data Science Lifecycle](images/lifecycle.png)
 
 # Plan
 
@@ -141,7 +144,7 @@ We don't want to get that amount of data from the API again and again.
 
 ```{r load_csv, message=FALSE, warning=FALSE}
 dir <- getwd()
-date <- "2022-04-01"
+date <- params$data_date
 
 price_list_buys <- read.csv(paste(dir, "/gw2-all-buys-raw-", date, ".csv", sep = ""))
 price_list_sells <- read.csv(paste(dir, "/gw2-all-sells-raw-", date, ".csv", sep = ""))
@@ -287,17 +290,29 @@ df_buys <- df_buys %>%
 This will make it easier to use their distinct values
 
 ```{r types}
-df_types <- data.frame(levels(df_sells$type))
+df_types <- data.frame(types = levels(df_sells$type))
+
 df_types %>% 
 gt(rowname_col = "name") %>%
-  tab_header(title = "Types")
+  tab_header(title = "Overview of existing types") %>% 
+  cols_label(
+    types = ""
+  )
+
+rm(df_types)
 ```
 
 ```{r rarity}
-df_rarity <- data.frame(levels(df_sells$rarity))
+df_rarity <- data.frame(rarity = levels(df_sells$rarity))
+
 df_rarity %>% 
 gt(rowname_col = "name") %>%
-  tab_header(title = "Rarity")
+  tab_header(title = "Overview of existing rarities") %>% 
+  cols_label(
+    rarity = ""
+  )
+
+rm(df_rarity)
 ```
 
 ## Analyze Data
@@ -313,18 +328,20 @@ df_sells_group <- df_sells %>%
             rarity = unique(rarity)) %>% 
   arrange(desc(mean_unit_price))
 
-top5 <- top_n(ungroup(df_sells_group), 5, mean_unit_price)
+df_top5 <- top_n(ungroup(df_sells_group), 5, mean_unit_price)
 
-top5 %>% 
+df_top5 %>% 
   ggplot() +
   geom_bar(aes(x = name, y = mean_unit_price, fill = rarity), stat="identity") +
   geom_point(aes(x = name, y = mean_vendor_value), fill = "#000000", stat="identity") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  scale_x_discrete(limits = top5$name) +
-  labs(x = "Name", y = "Mean price", title = "Most expensive items")
+  scale_x_discrete(limits = df_top5$name) +
+  labs(x = "Name", y = "Mean price",
+       title = "Five most expensive items", subtitle = "Items being sold (offers), in gold", 
+       caption = paste("Data from", params$data_date))
 ```
 
-`9999 gold` seems to be the maximum possible price for an auction.
+`r df_top5 %>% select(mean_unit_price) %>% first() %>% first()` gold seems to be the maximum possible price for an auction.
 Vendor prices are so low (copper range), that they appear as nearly zero points in this chart.
 
 Our top item here, the `Festive Grymm Svaard`, is a cosmetic item that can only be bought with real money and a lot of luck.
@@ -332,25 +349,37 @@ This is only an offer, so we'll have to find out if anyone would ever buy this i
 
 ```{r buy_prices_festive_grymm_svaard, message=FALSE, warning=FALSE}
 
-df_buys %>% 
+df_buys_top5_grymm <- df_buys %>% 
   filter(name == 'Festive Grymm Svaard') %>% 
   select(name, unit_price_gold) %>%
   top_n(5) %>% 
-  arrange(desc((unit_price_gold))) %>% 
+  arrange(desc((unit_price_gold)))
+
+df_buys_top5_grymm %>% 
   gt(rowname_col = "name") %>%
   tab_header(title = "Orders of the Festive Grymm Svaard") %>%
   fmt_number(
     columns = unit_price_gold
+  ) %>% 
+  cols_label(
+    unit_price_gold = "Unit price (in gold)"
   )
+
+highest_order <- df_buys_top5_grymm %>%
+  select(unit_price_gold) %>% 
+  first() %>% 
+  first()
+
+rm(df_buys_top5_grymm)
 ```
 
 
-As we can see, the highest order on this item is 300 gold. 
+As we can see, the highest order on this item is `r highest_order` gold. 
 That's pretty much, but far away from 9999.
 
 But who doesn't want to look that fancy.
-Cordyceps
-![Festive Grymm Svaard](images/Festive_Grymm_Svaard.jpg)
+
+![The Festive Grymm Svaard skin.](images/Festive_Grymm_Svaard.jpg){width=20%}
 
 #### High profit items
 
@@ -414,10 +443,12 @@ df_top_profit %>%
 ```
 
 
-#### Finding usable items
+#### Find usable items
+
+Starting with a low budget, we can't buy a lot of high-priced items. Therefore it's good to know which items get the most profit compared to their costs.
+We always suppose *the worst* profit.
 
 ```{r}
-
 df_high_roi <-  df_all %>% 
   group_by(name) %>% 
   summarise(
@@ -429,24 +460,52 @@ df_high_roi <-  df_all %>%
   ) %>% 
   ungroup() %>% 
   arrange(desc(profitByCost))
+```
 
+```{r display_high_profit_regression}
 df_high_roi %>% 
   ggplot(aes(x = cost,  y = profit)) +
   geom_point() +
   stat_summary(fun.data=mean_cl_normal) + 
-  geom_smooth(method='lm', formula= y~x)
+  geom_smooth(method='lm', formula= y~x) +
+  labs(x = "Cost", y = "Profit",
+       title = "Cost and Profit of Items", subtitle = "Prices in gold",
+       caption = paste("Data from", params$data_date))
 ```
-Great, we found items with very high profit.
-Let's try it!
+As we can see, there are some outliers with high costs and low profit, but also some high cost high profit ones.
+
+```{r}
+df_high_roi %>% 
+  mutate(
+    profitByCost = round(profitByCost, digits = 2),
+    profit = round(profit, digits = 2),
+    cost = round(cost, digits = 2)
+    ) %>% 
+  filter(profit > 0) %>% 
+  select(name, profitByCost, profit, cost, quantity) %>% 
+  datatable(extensions = c('ColReorder', 'Buttons', 'Responsive', 'Scroller', 'SearchPanes', 'Select'),
+            options = list(colReorder = TRUE,
+                           dom = 'Bfrtip', 
+                           buttons = list('searchPanes', 'copy', list(
+                                           extend = 'collection',
+                                           buttons = c('csv', 'excel', 'pdf'), 
+                                           text = 'Download'))),
+            escape = FALSE,
+            colnames=c("Name", "Profit by cost", "Profit", "Cost", "Quantity")
+            )
+```
+
+Great, we found items with very high profit. Let's buy some of them that also have a high quantity.
 
 ![Order_1](images/order1.png)
 
-#### Cluster Analysis (WIP)
+#### Short Cluster Analysis
 
-Create cluster (from https://www.kirenz.com/post/2020-05-21-r-hierarchische-clusteranalyse/)
+To get a better overview how the item cost and profits relate to each other, we'll do a quick cluster analysis.
 
+(taken from https://www.kirenz.com/post/2020-05-21-r-hierarchische-clusteranalyse/)
 
-```{r}
+```{r scale_profit_costs}
 df_cl <- df_high_roi %>% 
   select(c("id", "profit", "cost"))
 
@@ -455,7 +514,7 @@ df_cl$cost <- scale(df_cl$cost, center = TRUE, scale = TRUE)
 
 ```
 
-```{r}
+```{r plot_items_unclustered}
 df_cl %>% 
   ggplot(aes(cost, 
              profit, 
@@ -466,11 +525,13 @@ df_cl %>%
             vjust = 0, nudge_y = 0.1) +
   theme_classic() +
   ylab("Profit") +
-  xlab("Cost") 
+  xlab("Cost") +
+  scale_x_continuous(n.breaks = 20)
 ```
 
+Because we scaled the numbers we can't really say something about the real value of the items, but most of them are in the lower cost / lower profit range.
 
-```{r}
+```{r calculate_cluster}
 d <- 
   df_cl %>% 
   select(-id) %>% 
@@ -483,10 +544,13 @@ hc$labels <- df_cl$id
 
 grp <- cutree(hc, k = 4) 
 df_cl$cluster <- grp
+
+rm(d)
+rm(hc)
+rm(grp)
 ```
 
-```{r}
-
+```{r plot_items_clustered}
 df_cl %>% 
   ggplot(aes(cost, 
              profit, 
@@ -501,6 +565,15 @@ df_cl %>%
   ylab("Profit") +
   theme(legend.title=element_blank())
 ```
+We created four clusters out of the data.
+
+- The "(1) red" cluster are low-cost items with low profit (don't buys)
+- The "(2) green" cluster are low-cost items with high profit (should buys)
+- The "(3) teal" cluster are mid-cost, high profit items but there are only three of them in the cluster. (should buy with enough money)
+- The "(4) purple" cluster are mid-cost, low profit items (don't buys)
+
+It's interesting that there are a few items in the "(2) green" cluster that are also lower on profit and would probably also fit in the "(1) red" cluster, but 
+it seems that the "(2) green" cluster is also characterized by a higher price than the "(1) red" one.
 
 
 ### Rarity of items
@@ -519,9 +592,7 @@ colors <-
     "Ascended" = "#e64680",
     "Legendary" = "#53238a")
 
-df <- data.frame(rarities)
-
-df %>% 
+data.frame(rarities) %>% 
   ggplot() +
   geom_bar(aes(x = rarities, fill = rarities)) +
   scale_x_discrete(limits = rarities) +
@@ -585,6 +656,8 @@ df_item_types %>%
   facet_grid(df_item_types$type) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.3, hjust=1)) +
   labs(x = "Item types", y = "Count")
+
+rm(df_item_types)
 ```
 
 For armors we have the distinction between **Light** (for mages), **Medium** (for rangers) and **Heavy** (for warriors). 
@@ -645,15 +718,15 @@ As a player, you can learn up to two professions that can improve those base mat
 Let's first check if there are any outliers in the data that we should clean.
 
 ```{r outliers_crafting}
-mean_price_crafting_sells <- df_sells %>% 
+df_crafting_sells <- df_sells %>% 
   filter(type == "CraftingMaterial")
 
-mean_price_crafting_buys <- df_buys %>% 
+df_crafting_buys <- df_buys %>% 
   filter(type == "CraftingMaterial")
 
 ggplot() +  
-  geom_boxplot(data = mean_price_crafting_sells, aes(x = 'Sells', y = unit_price_gold)) +
-  geom_boxplot(data = mean_price_crafting_buys, aes(x = 'Buys', y = unit_price_gold)) +
+  geom_boxplot(data = df_crafting_sells, aes(x = 'Sells', y = unit_price_gold)) +
+  geom_boxplot(data = df_crafting_buys, aes(x = 'Buys', y = unit_price_gold)) +
   geom_hline(yintercept = 999, linetype="dashed", color = "red") +
   scale_y_continuous(labels = comma)
 
