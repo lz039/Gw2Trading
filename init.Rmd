@@ -27,11 +27,17 @@ output:
 library(tidyverse)
 library(readr)
 library(scales)
+library(visdat)
 
 library(ggplot2)
 library(gt)
 library(gtable)
 library(DT)
+
+library(rsample)
+library(tidymodels)
+
+tidymodels_prefer()
 ```
 # TODOs
 
@@ -60,14 +66,15 @@ One way may be farming, which means hunting special items in high amounts and se
 Another way is buying items from other players and reselling them with a higher price tag, just like in the real world.
 Many games have auction houses where those transactions can be made. For this type of income one needs to know what to buy when, which prices are low or high, and when to sell for which amount.
 
-For this project my example of game will be Guild Wars 2. Guild Wars 2 was published in 2012 by NCSoft. There are no monthly fees and the basic game is free to play since 2015. It is a massively multiplayer online role-playing game, meaning a lot of people playing in parallel in an online world. There are over 20.000 items that can be collected and many of them can be sold and bought at the auction house, called the trading post.
+For this project my example of game will be Guild Wars 2. Guild Wars 2 was published in 2012 by NCSoft. There are no monthly fees and the basic game is free to play since 2015. It is a massively multiplayer online role-playing game, meaning a lot of people playing in parallel in an online world. There are over 20.000 items that can be collected and most of them can be sold and bought at the auction house, called the trading post.
 
-[trading post](images/Trading_Post_home.jpg)
+![The trading post](images/Trading_Post_home.jpg)
 
 This is a picture of the auction house. There are many different types of items (Armor, Weapons, ...)
 
 When selling items, 5% of the cost is a fee for the auction house and gets immediately taken from your wallet.
 Each time an item is placed in the auction house, this 5% fee must be payed, so it's best if the items get sold on the first run.
+
 When buying items, 10% of the price goes to the bank before the rest is delivered to the seller.
 
 Because of that it's important to find items where the buy-to-sell price ratio is the highest.
@@ -91,15 +98,34 @@ This should only be a fun project exploring the R language and data science in g
 
 ## Identify variables
 
-For making the most out of our data, we can try to identify some important variables.
+The data is rather big but already structured for us (JSON).
 
-1. For buying low and selling high, we need to know everything about the `prices` like average, mean and quantiles.
-2. Where is the highest `difference` between buy and sell `prices`?
-2. Are there any `outliers` that are must-buys?
-3. What is the `quantity` of items on the market? 
-4. Are there any special `times` when people buy/sell?
-5. Investing in one item, what is the `return of investment (ROI)`?
+For making the most out of our data, we need to identify some important features. 
 
+Which features do we already have?
+
+- **name**: This is the name of the item.
+- **type**: can be something like `armor`, `consumable`, `crafting material` and so on
+- **rarity**: There are 8 types of rarity from very common to very rare.
+- **vendor_value**: What a sell to a NPC dealer would yield.
+- **id**: Unique ID of the item.
+- **icon**: URL to a picture of the item
+- **level**: Level required to use this item (1-80)
+- **item_type**: More detailed type of the item, based on basic type
+- **item_weight_class**: Especially for armor, who can use the item
+- **listings**: How many players are offering this item to this price
+- **unit_Price**: What the player wants for this item (in copper)
+- **quantity**: How many offers of this items there are for this price.
+
+Which features may have impact on the **unit_Price**?
+
+- **type**, **rarity**, **level**, **item_type**, **item_weight_class**, **quantity**
+
+Which features could be created in addition?
+
+1. Difference between `buy` and `sell prices`?
+2. What is the `return of investment (ROI)`?
+3. One interesting number is the `relative estimation window` between high and low estimates (or in our case, orders/offers) taken from [this book](https://islandora.wrlc.org/islandora/object/1112capstones%3A217/datastream/PDF/view). If the variance is 0, this values would be 1. If the prices are very different, this value will raise.
 
 ## Define Metrics
 
@@ -116,12 +142,13 @@ The data we need can be fetched from a REST API at https://api.guildwars2.com.
 There is also a good [documentation](https://wiki.guildwars2.com/wiki/API:Main) on how to use the API.
 
 We'll use three endpoint here:
-1. Get all items there are in the game
+
+- Get all items there are in the game
 
 For each item:
 
-2. Get selling and buying listings from auction house api
-3. Get basic information about the item like name, rarity etc.
+- Get selling and buying listings from auction house api
+- Get basic information about the item like name, rarity etc.
 
 At the end we can merge all this data to get a good overview of which items are sold/bought at the auction house.
 When joining all this together, we get a huge dataset of:
@@ -172,22 +199,8 @@ The seller data has the same structure, just for all the offers:
 glimpse(df_buys)
 ```
 
-- **name**: This is the name of the item.
-- **type**: can be something like `armor`, `consumable`, `crafting material` and so on
-- **rarity**: There are 8 types of rarity from very common to very rare.
-- **vendor_value**: What a sell to a NPC dealer would yield.
-- **id**: Unique ID of the item.
-- **icon**: URL to a picture of the item
-- **level**: Level required to use this item (1-80)
-- **item_type**: More detailed type of the item, based on basic type
-- **item_weight_class**: Especially for armor, who can use the item
-- **listings**: How many players are offering this item to this price
-- **unit_Price**: What the player wants for this item (in copper)
-- **quantity**: How many offers of this items there are for this price.
 
 Listings, Unit_Price and Quantity can be read together.
-
-E.g. for the first data entry:
 
 - There is 1 (`listings`) player 
 - offering 17 (`quantity`) pieces of this item 
@@ -221,42 +234,37 @@ df_buys %>%
   first()
 ```
 
-Let's have a closer look at the data if we need to clean anything.
-
 ## Data Cleaning 
 
-### Currency
+Because we get data from Guild Wars API, there is not much data cleaning needed.
 
-![coin](images/coin.png)
+We'll just create some more fields for convenience and change some data types.
+
+### Data corrections
+
+![Coins are the basic currency](images/coin.png)
 
 Just like in the real world, where 100 cents are 1 Euro, 
 the main currency in Guild Wars, coins, are separated into three units.
 
-There is copper, silver and gold. All those values are the same and are automatically calculated by the game.
+There is **copper**, **silver** and **gold**. 
 
+The following values are all the same and are automatically calculated by the game:
 `
 10.000 copper == 100 silver == 1 gold.
 `
 
-So we need to divide all values by `10.000` to display the price in gold, which is good for expensive goods and when we are searching for the upper prices.
-
-There may be occasions where it makes more sense to look for silver or even copper, but let's introduce the price as gold first.
+So we need to divide all values by `10.000` to display the price in gold, which is good for most goods. There may be occasions where it makes more sense to look for silver or even copper, but let's introduce the price as gold first.
 
 ```{r add_price_in_gold}
 df_sells <- df_sells %>% 
-  mutate(unit_price_gold = unit_price / 10000,
-         unit_price_silver = unit_price / 100,
-         unit_price_copper = unit_price) %>% 
+  mutate(unit_price_gold = unit_price / 10000) %>% 
   select(-unit_price)
 
 df_buys <- df_buys %>% 
-  mutate(unit_price_gold = unit_price / 10000,
-         unit_price_silver = unit_price / 100,
-         unit_price_copper = unit_price) %>% 
+  mutate(unit_price_gold = unit_price / 10000) %>% 
   select(-unit_price)
 ```
-
-### Listings and Quantities 
 
 In the dataset, there are listings and quantities. Each row is one or more player offering or ordering one type of item for one specific price.
 We don't have to care much about listings, as it's only a subcategory of quantity, so let's get rid of it.
@@ -268,8 +276,6 @@ df_sells <- df_sells %>%
 df_buys <- df_buys %>% 
   select(-listings)
 ```
-
-### Categorical values
 
 Those are categorical values with a static set and can therefore be treated as factors.
 
@@ -289,63 +295,337 @@ df_buys <- df_buys %>%
 
 This will make it easier to use their distinct values
 
-```{r types}
-df_types <- data.frame(types = levels(df_sells$type))
+Let's check if all data types are correct now.
 
-df_types %>% 
-gt(rowname_col = "name") %>%
-  tab_header(title = "Overview of existing types") %>% 
-  cols_label(
-    types = ""
-  )
-
-rm(df_types)
+```{r}
+vis_dat(df_buys %>%
+  drop_na() %>% 
+  unique(), warn_large_data = FALSE)
 ```
 
-```{r rarity}
-df_rarity <- data.frame(rarity = levels(df_sells$rarity))
+Looks good! Because there is no smaller unit than copper, it's fine to have it as integer.
+The data frame `df_sells` is a lot bigger and will take a while to compute, but it'll look exactly the same.
 
-df_rarity %>% 
-gt(rowname_col = "name") %>%
-  tab_header(title = "Overview of existing rarities") %>% 
-  cols_label(
-    rarity = ""
-  )
+### Creation of new variables
 
-rm(df_rarity)
+As described before, to see the variance of orders and offers for one item, we can calculate `High Estimate / Low Estimate`.
+
+```{r}
+df_buys <- df_buys %>% 
+  group_by(name) %>% 
+  mutate(estimation_window = round(max(unit_price_gold)/min(unit_price_gold), digits = 2))
+
+df_sells <- df_sells %>% 
+  group_by(name) %>% 
+  mutate(estimation_window = round(max(unit_price_gold)/min(unit_price_gold), digits = 2))
+
 ```
+
+For our goal to buy low and sell high, we need to know which items have the best profit.
+Therefore we need to `join` buys and sells and calculate the difference between sells and buys (respecting taxes).
+
+```{r merge_buys_sells}
+gc()
+
+df_all <- df_buys %>%
+  mutate(quantity_buys = quantity,
+         unit_price_gold_buys = unit_price_gold,
+         estimation_window_buys = estimation_window) %>% 
+  select(-quantity, -unit_price_gold, -estimation_window) %>% 
+  left_join(df_sells %>% 
+              mutate(quantity_sells = quantity,
+                     unit_price_gold_sells = unit_price_gold,
+                     estimation_window_sells = estimation_window) %>% 
+              select(id, quantity_sells, unit_price_gold_sells, estimation_window_sells), by = "id") %>% 
+  mutate(name = name.x) %>% 
+  select(-name.x, -name.y)
+
+#cleanup
+rm(df_buys)
+rm(df_sells)
+gc()
+
+```
+Now we can calculate the profit:
+
+```{r calculate_diffs}
+df_all <- df_all %>% 
+  mutate(unit_price_gold_diff = unit_price_gold_sells - unit_price_gold_buys,
+         profit = 0.85 * unit_price_gold_sells - unit_price_gold_buys,
+         more_sells = quantity_sells - quantity_buys)
+```
+
+We got a lot of data now, let's strip it down a bit. We need to make some assumptions now:
+
+- Only take 3000 most profit items that also have at least 10 more sells than buys.
+
+```{r}
+
+df_top_profit <- df_all %>% 
+    group_by(name) %>% 
+    summarise(profit = round(min(profit), digits = 2),
+              id = unique(id),
+              mean_more_sells = mean(more_sells)) %>% 
+    ungroup() %>% 
+    arrange(desc(profit)) %>%
+    filter(mean_more_sells > 10) %>% 
+    head(3000) %>% 
+    select(id)
+
+df_all_top_profit <- df_all %>% 
+  filter(id %in% df_top_profit$id)
+
+rm(df_top_profit)
+```
+Let's have a look what we have now:
+
+```{r}
+
+df_top_profit_sells_mean <- df_all_top_profit %>% 
+  group_by(name) %>%
+  summarize(id = unique(id),
+            mean_unit_price_gold_sells = mean(unit_price_gold_sells), 
+            mean_estimation_window_sells = mean(estimation_window_sells))
+
+df_top_profit_sells_mean %>% 
+  ggplot(aes(mean_unit_price_gold_sells, 
+             mean_estimation_window_sells, 
+             label = id)) +
+  geom_point() +
+  geom_text(size = 3,
+            check_overlap = FALSE,
+            vjust = 0, nudge_y = 0.1) +
+  theme_classic() +
+  xlab("Mean unit sell prices in gold") +
+  ylab("Mean sell estimation window") +
+  theme(legend.title=element_blank())
+```
+
+
+
+
+## [WIP] Split data
+
+To make the data split reproducible, we set a seed.
+
+We want to predict the gold price based on attributes of the item.
+
+```{r}
+set.seed(42)
+
+# Put 3/4 of the data into the training set 
+data_split <- initial_split(df_buys, 
+                           prop = 3/4, 
+                           strata = unit_price_gold, 
+                           breaks = 4)
+
+# Create dataframes for the two sets:
+train_data <- training(data_split) 
+test_data <- testing(data_split)
+```
+
+Create validation set (used during modeling)
+
+```{r}
+cv_folds <- 
+  vfold_cv(train_data,
+           v=5,
+           strata = unit_price_gold,
+           breaks = 4)
+
+df_train <- train_data 
+```
+
+Now work with the train data.
 
 ## Analyze Data
 
+### Types
+
+```{r type_distribution}
+df_types <- df_sells %>% 
+  distinct(type, name) %>%
+  group_by(type) %>% 
+  count(type)
+
+df_types %>% 
+  ggplot() +
+  geom_bar(aes(x = type, y = n, fill = type), stat='identity') +
+  theme(axis.text.x = element_text(angle = 45, hjust=1), legend.position="bottom") +
+  labs(title = "Type distribution", subtitle = "of all types", fill = "Types",
+    x = "Type", y = "Count", caption = paste("Data from", params$data_date))
+```
+There are a lot of different types of items.
+As we can see, Armor, Consumables and Weapons are the most common items.
+
+This means there are very many different weapon, consumable and armor items in the game, but not that many different crafting materials and upgrade components which seems reasonable.
+
+Armors and Weapons can be further broken down into sub types:
+
+```{r item_type_distribution}
+df_item_types <- df_sells %>% 
+  filter(type %in% c("Armor", "Weapon")) %>% 
+  distinct(type, item_type, item_weight_class, name) %>%
+  group_by(type, item_type, item_weight_class) %>% 
+  count(item_type)
+
+df_item_types %>% 
+  ggplot() +
+  geom_bar(aes(x = item_type, y = n, fill = item_weight_class), stat='identity') +
+  facet_grid(df_item_types$type) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.3, hjust=1)) +
+  labs(title = "Detailed item types", subtitle = "Split by armors and weapons", fill = "Item weight",
+    x = "Item types", y = "Count", caption = paste("Data from", params$data_date))
+
+rm(df_item_types)
+```
+
+For armors we have the distinction between **Light** (for mages), **Medium** (for rangers) and **Heavy** (for warriors). 
+Clothing are special items for the style points.
+There is no such distinction for weapons. Different classes can use different weapons, but all of them can be used by more than one class.
+
+Let's have a closer look at one of the types, **Tinket**.
+
+```{r trinket_overview, message=FALSE, warning=FALSE}
+
+df_sells %>%
+  filter(type == "Trinket") %>% 
+  group_by(type, rarity) %>% 
+  summarise(name = unique(name),
+            mean = mean(unit_price_gold),
+            icon = min(web_image(icon, height = 50))
+            ) %>% 
+  drop_na() %>% 
+  arrange(desc(mean)) %>%
+  gt(rowname_col = "name") %>%
+  tab_header(title = "Trinkets", subtitle = "Items with special means") %>%
+  fmt_number(
+    columns = mean,
+    suffixing = "G"
+  ) %>% 
+  fmt_markdown(
+    columns = icon
+  ) %>% 
+  summary_rows(
+    columns = mean,
+    fns = list(TOTAL = "sum"),
+    formatter = fmt_number
+  ) %>%
+  tab_footnote(
+    footnote = "Prices in gold",
+    locations = cells_column_labels(columns = mean)
+  ) %>%
+  tab_source_note(
+    "Based on data from api.guildwars2.com"
+  ) %>% 
+  tab_options(
+    summary_row.background.color = "#ACEACE",
+    row_group.background.color = "#FFEFDB",
+    table.layout = "auto",
+    container.overflow.x = TRUE,
+    container.height = px(350)
+  )
+```
+
+
+### Rarity of items
+
+There are different rarities in Guild Wars that suggest how often this item will occur in the game:
+
+```{r rarity_of_items, message=FALSE, warning=FALSE}
+rarities <- c("Junk", "Basic", "Fine", "Masterwork", "Rare", "Exotic", "Ascended", "Legendary")
+colors <- 
+  c("Junk" = "#a3aeb9",
+    "Basic" = "#000000",
+    "Fine" = "#6a9cd9", 
+    "Masterwork" = "#17911a", 
+    "Rare" = "#f0cd25",
+    "Exotic" = "#e9ad1a",
+    "Ascended" = "#e64680",
+    "Legendary" = "#53238a")
+
+data.frame(rarities) %>% 
+  ggplot() +
+  geom_bar(aes(x = rarities, fill = rarities)) +
+  scale_x_discrete(limits = rarities) +
+  scale_fill_manual("Rarity", values = colors) + 
+  theme(axis.text.y=element_blank(),
+        axis.title.y=element_blank(),
+        axis.title.x=element_blank())
+```
+
+What is obvious by the names, rarity on the left is in general more common than rarity on the right.
+
+One important information is that a lot of very rare items (`Ascended` and `Legendary`) can't be sold to other players. That's the reason we see much more `Rare` and `Exotic` items being sold for high prices than those really rare ones.
+Junk is zero because it can only be sold at non-player vendors.
+
+In our dataset, we have the following distribution:
+
+```{r rarity_distribution}
+df <- df_sells %>% 
+  count(rarity) %>% 
+  arrange(desc(n))
+
+df %>% 
+  ggplot() +
+  geom_bar(aes(x = rarity, y = n, fill = rarity), stat='identity') +
+  scale_x_discrete(limits = rarities) +
+  scale_fill_manual("Rarity", values = colors) +
+  labs(title = "Rarity distribution", subtitle = "of all raritires", fill = "Rarity",
+    x = "Rarity", y = "Count", caption = paste("Data from", params$data_date))
+
+relevant_rarities <- df %>% 
+  filter(n > 100000)
+
+relevant_rarities <- relevant_rarities$rarity
+```
+
+
+
 ### Item prices
 
+#### Understanding offers and orders
+
+On the auction house, one can create an offer (to sell items) or an order (to buy items).
+
+If an **offer** is created, the game automatically searches for the highest **order** price and if that's fine for the seller, the item will be sold and sent. But the seller can also create an offer for a specific price (higher than the other orders) and *wait*, until someone wants to buy the item for the wanted amount.
+
+The same is true for **orders**. Items can be bought immediately from the lowest offer or an **order** is created (lower than the other offers) and will *wait*, until someone sells the item for the wanted amount.
+
+Let's make an example:
+
 ```{r top5_expensive_items, message=FALSE, warning=FALSE}
-df_sells_group <- df_sells %>% 
+df_top5 <- df_sells %>% 
   group_by(name) %>% 
-  summarise(mean_unit_price = mean(unit_price_gold), 
-            mean_vendor_value = mean(vendor_value) / 10000,
+  summarise(mean_unit_price_gold = mean(unit_price_gold), 
+            mean_vendor_value_gold = mean(vendor_value) / 10000,
             type = unique(type),
             rarity = unique(rarity)) %>% 
-  arrange(desc(mean_unit_price))
-
-df_top5 <- top_n(ungroup(df_sells_group), 5, mean_unit_price)
+  arrange(desc(mean_unit_price_gold)) %>% 
+  ungroup() %>% 
+  top_n(5, mean_unit_price_gold)
 
 df_top5 %>% 
   ggplot() +
-  geom_bar(aes(x = name, y = mean_unit_price, fill = rarity), stat="identity") +
-  geom_point(aes(x = name, y = mean_vendor_value), fill = "#000000", stat="identity") +
+  geom_bar(aes(x = name, y = mean_unit_price_gold, fill = rarity), stat="identity") +
+  geom_point(aes(x = name, y = mean_vendor_value_gold), fill = "#000000", stat="identity") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   scale_x_discrete(limits = df_top5$name) +
   labs(x = "Name", y = "Mean price",
        title = "Five most expensive items", subtitle = "Items being sold (offers), in gold", 
        caption = paste("Data from", params$data_date))
+
+highest_offer <- df_top5 %>% 
+  select(mean_unit_price_gold) %>%
+  first() %>% 
+  first()
+
+rm(df_top5)
 ```
 
-`r df_top5 %>% select(mean_unit_price) %>% first() %>% first()` gold seems to be the maximum possible price for an auction.
-Vendor prices are so low (copper range), that they appear as nearly zero points in this chart.
-
-Our top item here, the `Festive Grymm Svaard`, is a cosmetic item that can only be bought with real money and a lot of luck.
-This is only an offer, so we'll have to find out if anyone would ever buy this item to this price.
+Our top item here, the `Festive Grymm Svaard`, is a cosmetic item that can only be bought with real money and a lot of luck. 
+It costs `r highest_offer` gold which seems to be the maximum possible price for an auction. 
+This is only an **offer**, someone wants to sell this item for this price, so we'll have to find out if anyone would ever buy this.
 
 ```{r buy_prices_festive_grymm_svaard, message=FALSE, warning=FALSE}
 
@@ -375,38 +655,72 @@ rm(df_buys_top5_grymm)
 
 
 As we can see, the highest order on this item is `r highest_order` gold. 
-That's pretty much, but far away from 9999.
+That's pretty much, but far away from `r highest_offer`.
+
+If someone is able to buy this item for `r highest_order` gold and sell it again for `r highest_offer` that would be a good fortune. 
+
+Because the prices are so different, it's unlikely that this will happen.
 
 But who doesn't want to look that fancy.
 
 ![The Festive Grymm Svaard skin.](images/Festive_Grymm_Svaard.jpg){width=20%}
 
+```{r remove_unused_vars}
+rm(highest_order)
+rm(highest_offer)
+```
+
+
+#### [WIP] Price distribution
+
+Now let's not only look at the top five items, but at the distribution in general.
+
+```{r rough_price_distribution}
+df_sells_distribution <- df_sells %>% 
+  group_by(name) %>% 
+  summarise(mean_unit_price_gold = mean(unit_price_gold),
+            type = unique(type),
+            rarity = unique(rarity)) %>% 
+  arrange(desc(mean_unit_price_gold))
+  
+df_sells_distribution %>% 
+  ggplot() +
+  geom_histogram(aes(x =  mean_unit_price_gold, fill = type), stat="count") +
+  scale_x_binned(limits = c(0, 1000)) +
+  labs(x = "Mean price", y = "Count",
+       title = "Item price distribution", subtitle = "Items being sold (offers), in gold", 
+       caption = paste("Data from", params$data_date))
+```
+
+As we can see, prices are common between 0 - 100 gold. What we also see is that there are a lot of different types of items.
+We can strip this down so we only see the relevant types.
+
+```{r}
+
+relevant_types <- df_sells_distribution %>% 
+  group_by(type) %>% 
+  count() %>% 
+  filter(n > 350)
+
+df_sells_distribution <- df_sells_distribution %>% 
+  filter(type %in% C(relevant_types$type))
+
+df_sells_distribution %>% 
+  ggplot() +
+  geom_histogram(aes(x =  mean_unit_price_gold, fill = type), stat="count") +
+  scale_x_binned(limits = c(0, 50), breaks = c(0, 10, 25, 50)) +
+  facet_grid(. ~ type) + 
+  labs(x = "Mean price", y = "Count",
+       title = "Item price distribution", subtitle = "Items being sold (offers), in gold", 
+       caption = paste("Data from", params$data_date))
+```
+
+
+
 #### High profit items
 
 For our goal to buy low and sell high, we need to know which items have the best profit.
 As explained before, because of taxes, profit means `85% of the sell price` - `buy price`.
-
-We first need to organize our data to calculate the difference between buys and sells:
-
-```{r merge_buys_sells}
-df_all <- df_buys %>% 
-  select(id, name, unit_price_gold, quantity) %>% 
-  left_join(df_sells %>% 
-              select(id, unit_price_gold, quantity),
-            by = "id", suffix = c("_buys", "_sells"))
-```
-
-Now we can calculate the profit:
-
-```{r calculate_diffs}
-df_all <- df_all %>% 
-  mutate(unit_price_gold_diff = unit_price_gold_sells - unit_price_gold_buys,
-         profit = 0.85 * unit_price_gold_sells - unit_price_gold_buys,
-         quantity_diff = quantity_sells - quantity_buys) %>% 
-  filter(profit > 0) %>% 
-  arrange(unit_price_gold_diff) %>% 
-  filter(quantity_diff > 0)
-```
 
 Let's have a look at the top 100 items with the highest profit.
 As we can see, even the top 100 are very special items that aren't often traded (`quantity` < 10).
@@ -576,138 +890,6 @@ It's interesting that there are a few items in the "(2) green" cluster that are 
 it seems that the "(2) green" cluster is also characterized by a higher price than the "(1) red" one.
 
 
-### Rarity of items
-
-There are different rarities in Guild Wars that suggest how often this item will occur in the game:
-
-```{r rarity_of_items, message=FALSE, warning=FALSE}
-rarities <- c("Junk", "Basic", "Fine", "Masterwork", "Rare", "Exotic", "Ascended", "Legendary")
-colors <- 
-  c("Junk" = "#a3aeb9",
-    "Basic" = "#000000",
-    "Fine" = "#6a9cd9", 
-    "Masterwork" = "#17911a", 
-    "Rare" = "#f0cd25",
-    "Exotic" = "#e9ad1a",
-    "Ascended" = "#e64680",
-    "Legendary" = "#53238a")
-
-data.frame(rarities) %>% 
-  ggplot() +
-  geom_bar(aes(x = rarities, fill = rarities)) +
-  scale_x_discrete(limits = rarities) +
-  scale_fill_manual("Rarity", values = colors) + 
-  theme(axis.text.y=element_blank(),
-        axis.title.y=element_blank(),
-        axis.title.x=element_blank())
-```
-
-What is obvious by the names, rarity on the left is in general more common than rarity on the right.
-
-One important information is that a lot of very rare items (`Ascended` and `Legendary`) can't be sold to other players. That's the reason we see much more `Rare` and `Exotic` items being sold for high prices than those really rare ones.
-Junk is zero because it can only be sold at non-player vendors.
-
-In our dataset, we have the following distribution:
-
-```{r rarity_distribution}
-df <- df_sells %>% 
-  count(rarity) %>% 
-  arrange(desc(n))
-
-df %>% 
-  ggplot() +
-  geom_bar(aes(x = rarity, y = n, fill = rarity), stat='identity') +
-  scale_x_discrete(limits = rarities) +
-  scale_fill_manual("Rarity", values = colors)
-```
-
-### Types
-
-There are a lot of different types of items.
-As we can see, Armor, Consumables and Weapons are the most common items.
-
-Here we only see the distribution of items in the game. There are no numbers about sells yet.
-
-This means there are very many different weapon, consumable and armor items in the game, but not that many different crafting materials and upgrade components which seems reasonable.
-
-```{r type_distribution}
-df_types <- df_sells %>% 
-  distinct(type, name) %>%
-  group_by(type) %>% 
-  count(type)
-
-df_types %>% 
-  ggplot() +
-  geom_bar(aes(x = type, y = n, fill = type), stat='identity') +
-  theme(axis.text.x = element_text(angle = 45, hjust=1))
-```
-Armors and Weapons can be further broken down into sub types:
-
-```{r item_type_distribution}
-df_item_types <- df_sells %>% 
-  filter(type %in% c("Armor", "Weapon")) %>% 
-  distinct(type, item_type, item_weight_class, name) %>%
-  group_by(type, item_type, item_weight_class) %>% 
-  count(item_type)
-
-df_item_types %>% 
-  ggplot() +
-  geom_bar(aes(x = item_type, y = n, fill = item_weight_class), stat='identity') +
-  facet_grid(df_item_types$type) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.3, hjust=1)) +
-  labs(x = "Item types", y = "Count")
-
-rm(df_item_types)
-```
-
-For armors we have the distinction between **Light** (for mages), **Medium** (for rangers) and **Heavy** (for warriors). 
-Clothing are special items for the style points.
-There is no such distinction for weapons. Different classes can use different weapons, but all of them can be used by more than one class.
-
-
-Let's have a closer look at the type **Tinket**.
-
-```{r trinket_overview, message=FALSE, warning=FALSE}
-
-df_sells %>%
-  filter(type == "Trinket") %>% 
-  group_by(type, rarity) %>% 
-  summarise(name = unique(name),
-            mean = mean(unit_price_gold),
-            icon = min(web_image(icon, height = 50))
-            ) %>% 
-  drop_na() %>% 
-  arrange(desc(mean)) %>%
-  gt(rowname_col = "name") %>%
-  tab_header(title = "Trinkets", subtitle = "Items with special means") %>%
-  fmt_number(
-    columns = mean,
-    suffixing = "G"
-  ) %>% 
-  fmt_markdown(
-    columns = icon
-  ) %>% 
-  summary_rows(
-    columns = mean,
-    fns = list(TOTAL = "sum"),
-    formatter = fmt_number
-  ) %>%
-  tab_footnote(
-    footnote = "Prices in gold",
-    locations = cells_column_labels(columns = mean)
-  ) %>%
-  tab_source_note(
-    "Based on data from api.guildwars2.com"
-  ) %>% 
-  tab_options(
-    summary_row.background.color = "#ACEACE",
-    row_group.background.color = "#FFEFDB",
-    table.layout = "auto",
-    container.overflow.x = TRUE,
-    container.height = px(350)
-  )
-```
-
 ### Crafting Material
 
 Let's have a closer look on one of the most important resources in the game: Crafting material.
@@ -728,7 +910,9 @@ ggplot() +
   geom_boxplot(data = df_crafting_sells, aes(x = 'Sells', y = unit_price_gold)) +
   geom_boxplot(data = df_crafting_buys, aes(x = 'Buys', y = unit_price_gold)) +
   geom_hline(yintercept = 999, linetype="dashed", color = "red") +
-  scale_y_continuous(labels = comma)
+  scale_y_continuous(labels = comma) +
+  labs(title = "Outliers on crafting material", subtitle = "Baseline at 999 gold",
+    x = "", y = "Price in gold", caption = paste("Data from", params$data_date))
 
 ```
 
@@ -783,9 +967,12 @@ The first real crafting material is `Large Claw`, with still over
 
 The most expensive mean crafting material is `r exp_sell_item_name`.
 
+### Feature engineering
 
-## Define schema
+Let's summarize what we've learned so far:
 
+- Filter for types: `r relevant_types$type`
+- Filter for rarity: `r relevant_rarities`
 
 
 
