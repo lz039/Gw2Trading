@@ -35,6 +35,8 @@ library(DT)
 
 library(rsample)
 library(tidymodels)
+library(GGally)
+library(corrr)
 
 tidymodels_prefer()
 ```
@@ -323,6 +325,19 @@ df_buys <- df_buys %>%
          quantity_rel = quantity / max(quantity))
 ```
 
+Create some helper for feature names.
+
+```{r}
+feat_cat <- 
+  df_sells %>% 
+  select(!where(is.numeric), -name, -icon) %>%
+  names()
+
+feat_num <- 
+  df_sells %>% 
+  select(where(is.numeric), -id) %>% 
+  names()
+```
 
 
 Let's check if all data types are correct now.
@@ -534,105 +549,99 @@ Now work with the train data.
 
 ### Item prices
 
-#### Understanding offers and orders
+#### [WIP - overview]
 
-On the auction house, one can create an offer (to sell items) or an order (to buy items).
 
-If an **offer** is created, the game automatically searches for the highest **order** price and if that's fine for the seller, the item will be sold and sent. But the seller can also create an offer for a specific price (higher than the other orders) and *wait*, until someone wants to buy the item for the wanted amount.
+Not sure if this makes sense.
 
-The same is true for **orders**. Items can be bought immediately from the lowest offer or an **order** is created (lower than the other offers) and will *wait*, until someone sells the item for the wanted amount.
+```{r}
+for (i in feat_cat) {
+  p <- ggplot(df_train, aes_string(x=i)) +
+  geom_bar()
+  plot(p)
+}
 
-Let's make an example:
+df_train %>% 
+  select(unit_price_gold_buys, unit_price_gold_sells, quantity_buys, quantity_sells) %>% 
+  ggscatmat(alpha = 0.2)
 
-```{r top5_expensive_items, message=FALSE, warning=FALSE}
-df_top5 <- df_sells %>% 
+df_train %>%  
+  select(type, profit) %>% 
+  ggpairs(aes(fill = type))
+
+```
+#### Find correlations
+
+```{r spearman_analysis}
+df_train %>% 
+  select(where(is.numeric), -more_sells, -profit, -quantity_rel, -unit_price_gold_diff) %>% # only select numerical data
+  vis_cor(cor_method = "spearman", na_action = "pairwise.complete.obs")
+```
+
+We see that our data is pretty uncorrelated which makes it hard to find a good classification model. What we see is that buy and sell price are somewhat correlated as well as the level of the item to the vendor value.
+
+The latter makes sense, as there must be some kind of algorithm that sets the sell price, probably also based on the item's level.
+
+Following idea: A model that predicts the sell price based on the buy price. Then we search for outliers where the sell price was predicted too high. Probably those items are underrated somehow?
+
+#### Price distribution
+
+Let's have a look at the distribution of profit in general for these items.
+
+```{r profit_distribution}
+df_train_distribution <- df_train %>% 
   group_by(name) %>% 
-  summarise(mean_unit_price_gold = mean(unit_price_gold), 
-            mean_vendor_value_gold = mean(vendor_value) / 10000,
+  summarise(mean_profit = mean(profit),
             type = unique(type),
             rarity = unique(rarity)) %>% 
-  arrange(desc(mean_unit_price_gold)) %>% 
-  ungroup() %>% 
-  top_n(5, mean_unit_price_gold)
-
-df_top5 %>% 
+  arrange(desc(mean_profit))
+  
+df_train_distribution %>% 
   ggplot() +
-  geom_bar(aes(x = name, y = mean_unit_price_gold, fill = rarity), stat="identity") +
-  geom_point(aes(x = name, y = mean_vendor_value_gold), fill = "#000000", stat="identity") +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  scale_x_discrete(limits = df_top5$name) +
-  labs(x = "Name", y = "Mean price",
-       title = "Five most expensive items", subtitle = "Items being sold (offers), in gold", 
+  geom_histogram(aes(x =  mean_profit, fill = type), stat="count") +
+  scale_x_binned(limits = c(0, 0.4)) +
+  labs(x = "Mean profit", y = "Count",
+       title = "Item profit distribution", subtitle = "Items by profit, in gold", 
        caption = paste("Data from", params$data_date))
+```
+#### Sell distribution 
 
-highest_offer <- df_top5 %>% 
-  select(mean_unit_price_gold) %>%
-  first() %>% 
+```{r sell_distribution}
+
+min <- df_train %>% 
+  summarise(sells = min(more_sells)) %>% 
   first()
 
-rm(df_top5)
-```
-
-Our top item here, the `Festive Grymm Svaard`, is a cosmetic item that can only be bought with real money and a lot of luck. 
-It costs `r highest_offer` gold which seems to be the maximum possible price for an auction. 
-This is only an **offer**, someone wants to sell this item for this price, so we'll have to find out if anyone would ever buy this.
-
-```{r buy_prices_festive_grymm_svaard, message=FALSE, warning=FALSE}
-
-df_buys_top5_grymm <- df_buys %>% 
-  filter(name == 'Festive Grymm Svaard') %>% 
-  select(name, unit_price_gold) %>%
-  top_n(5) %>% 
-  arrange(desc((unit_price_gold)))
-
-df_buys_top5_grymm %>% 
-  gt(rowname_col = "name") %>%
-  tab_header(title = "Orders of the Festive Grymm Svaard") %>%
-  fmt_number(
-    columns = unit_price_gold
-  ) %>% 
-  cols_label(
-    unit_price_gold = "Unit price (in gold)"
-  )
-
-highest_order <- df_buys_top5_grymm %>%
-  select(unit_price_gold) %>% 
-  first() %>% 
-  first()
-
-rm(df_buys_top5_grymm)
+df_train_distribution <- df_train %>% 
+  group_by(name) %>% 
+  summarise(sells = more_sells/min) %>% 
+  ungroup() %>% 
+  filter(sells != 0) %>% 
+  arrange(desc(sells))
+  
+df_train_distribution %>% 
+  ggplot() +
+  geom_density(aes(sells)) +
+  labs(x = "Buy/Sell distribution", y = "Count",
+       title = "Item sell distribution", subtitle = "positive values: more sells than buys", 
+       caption = paste("Data from", params$data_date))
 ```
 
 
-As we can see, the highest order on this item is `r highest_order` gold. 
-That's pretty much, but far away from `r highest_offer`.
-
-If someone is able to buy this item for `r highest_order` gold and sell it again for `r highest_offer` that would be a good fortune. 
-
-Because the prices are so different, it's unlikely that this will happen.
-
-But who doesn't want to look that fancy.
-
-![The Festive Grymm Svaard skin.](images/Festive_Grymm_Svaard.jpg){width=20%}
-
-```{r remove_unused_vars}
-rm(highest_order)
-rm(highest_offer)
-```
-
-#### Find usable items
+#### Find profitable items
 
 Starting with a low budget, we can't buy a lot of high-priced items. Therefore it's good to know which items get the most profit compared to their costs.
 We always suppose *the worst* profit.
 
 ```{r}
-df_high_roi <-  df_all %>% 
+df_train_high_roi <-  df_train %>% 
   group_by(name) %>% 
   summarise(
     id = unique(id),
     profitByCost = min(profit) / max(unit_price_gold_buys),
     profit = min(profit),
-    cost = max(unit_price_gold_buys),
+    cost = max(unit_price_gold_buys) * 100,
+    sell = min(unit_price_gold_sells) * 100,
     quantity = min(quantity_buys)
   ) %>% 
   ungroup() %>% 
@@ -640,10 +649,9 @@ df_high_roi <-  df_all %>%
 ```
 
 ```{r display_high_profit_regression}
-df_high_roi %>% 
+df_train_high_roi %>% 
   ggplot(aes(x = cost,  y = profit)) +
   geom_point() +
-  stat_summary(fun.data=mean_cl_normal) + 
   geom_smooth(method='lm', formula= y~x) +
   labs(x = "Cost", y = "Profit",
        title = "Cost and Profit of Items", subtitle = "Prices in gold",
@@ -652,14 +660,15 @@ df_high_roi %>%
 As we can see, there are some outliers with high costs and low profit, but also some high cost high profit ones.
 
 ```{r}
-df_high_roi %>% 
+df_train_high_roi %>% 
   mutate(
     profitByCost = round(profitByCost, digits = 2),
     profit = round(profit, digits = 2),
-    cost = round(cost, digits = 2)
+    cost = round(cost, digits = 2),
+    sell = round(sell, digits = 2)
     ) %>% 
   filter(profit > 0) %>% 
-  select(name, profitByCost, profit, cost, quantity) %>% 
+  select(name, profitByCost, profit, cost, sell, quantity) %>% 
   datatable(extensions = c('ColReorder', 'Buttons', 'Responsive', 'Scroller', 'SearchPanes', 'Select'),
             options = list(colReorder = TRUE,
                            dom = 'Bfrtip', 
@@ -668,13 +677,26 @@ df_high_roi %>%
                                            buttons = c('csv', 'excel', 'pdf'), 
                                            text = 'Download'))),
             escape = FALSE,
-            colnames=c("Name", "Profit by cost", "Profit", "Cost", "Quantity")
+            colnames=c("Name", "Profit by cost", "Profit", "Cost", "Sell", "Quantity")
             )
 ```
 
 Great, we found items with very high profit. Let's buy some of them that also have a high quantity.
 
-![Order_1](images/order1.png)
+
+## Model
+
+```{r}
+df_rec <-
+  recipe(profit ~ ., data = train_data) %>%
+  step_impute_median(all_numeric(), -all_outcomes()) %>%
+  step_impute_mode(all_nominal_predictors()) %>%
+  step_normalize(all_numeric(), -all_outcomes()) %>% 
+  step_dummy(all_nominal_predictors()) %>%
+  step_corr(all_predictors(), threshold = 0.7, method = "spearman")
+```
+
+## Train
 
 #### Short Cluster Analysis
 
@@ -683,7 +705,7 @@ To get a better overview how the item cost and profits relate to each other, we'
 (taken from https://www.kirenz.com/post/2020-05-21-r-hierarchische-clusteranalyse/)
 
 ```{r scale_profit_costs}
-df_cl <- df_high_roi %>% 
+df_cl <- df_train_high_roi %>% 
   select(c("id", "profit", "cost"))
 
 df_cl$profit <- scale(df_cl$profit, center = TRUE, scale = TRUE)
@@ -746,8 +768,5 @@ We created four clusters out of the data.
 
 - The "(1) red" cluster are low-cost items with low profit (don't buys)
 - The "(2) green" cluster are low-cost items with high profit (should buys)
-- The "(3) teal" cluster are mid-cost, high profit items but there are only three of them in the cluster. (should buy with enough money)
-- The "(4) purple" cluster are mid-cost, low profit items (don't buys)
-
-It's interesting that there are a few items in the "(2) green" cluster that are also lower on profit and would probably also fit in the "(1) red" cluster, but 
-it seems that the "(2) green" cluster is also characterized by a higher price than the "(1) red" one.
+- The "(3) teal" cluster are mid-cost items with different profit
+- The "(4) purple" cluster are high-cost items with a high variance in profit (maybe more outliers)
