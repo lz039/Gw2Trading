@@ -26,7 +26,6 @@ output:
 ```{r init, message=FALSE, warning=FALSE, include=FALSE}
 library(tidyverse)
 library(readr)
-library(scales)
 library(visdat)
 
 library(ggplot2)

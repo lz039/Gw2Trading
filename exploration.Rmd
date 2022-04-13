@@ -1,7 +1,80 @@
 ---
-title: "Data exploration"
-output: html_notebook
+title: "Data Exploration for Insight in the economy of an Massively Multiplayer Online Role-Playing Game"
+author: "Lukas Zaiser"
+params: 
+ institute: "HdM Stuttgart"
+ country: "Germany"
+ year: "2022"
+ data_date: "2022-04-01"
+output:
+ html_document: 
+  css: style.css # define your own css
+  df_print: paged #  tables are printed as HTML tables 
+  highlight: default # syntax highlighting style 
+  number_sections: yes # numbering of sections
+  theme: paper # style option
+  fig_height: 4 # figure height
+  fig_width: 8 # figure width
+  toc: yes # table of content
+  toc_float: 
+    collapsed: true # show full toc
+    smooth_scroll: true # toc scrolling behavior
+  includes:
+    after_body: footer.html # include footer
 ---
+
+```{r init, message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(readr)
+
+library(ggplot2)
+library(gt)
+library(gtable)
+library(DT)
+
+library(scales) # for label_number_si
+```
+
+# Load data
+
+```{r load_csv, message=FALSE, warning=FALSE}
+dir <- getwd()
+date <- params$data_date
+
+price_list_buys <- read.csv(paste(dir, "/gw2-all-buys-raw-", date, ".csv", sep = ""))
+price_list_sells <- read.csv(paste(dir, "/gw2-all-sells-raw-", date, ".csv", sep = ""))
+item_list <- read.csv(paste(dir, "/gw2-all-items-raw-", date, ".csv", sep = ""))
+
+df_buys <- item_list %>% left_join(price_list_buys)
+df_sells <- item_list %>% left_join(price_list_sells)
+
+rm(dir)
+rm(date)
+rm(item_list)
+rm(price_list_sells)
+rm(price_list_buys)
+```
+
+## Data cleaning
+
+```{r}
+df_sells <- df_sells %>% 
+  mutate(rarity = as.factor(rarity),
+         type = as.factor(type),
+         item_type = as.factor(item_type),
+         item_weight_class = as.factor(item_weight_class),
+         unit_price_gold = unit_price / 10000) %>% 
+  select(-unit_price)
+
+df_buys <- df_buys %>% 
+  mutate(rarity = as.factor(rarity),
+         type = as.factor(type),
+         item_type = as.factor(item_type),
+         item_weight_class = as.factor(item_weight_class),
+         unit_price_gold = unit_price / 10000) %>% 
+  select(-unit_price)
+```
+
 
 # Data Exploration
 
@@ -20,6 +93,7 @@ df_types %>%
   labs(title = "Type distribution", subtitle = "of all types", fill = "Types",
     x = "Type", y = "Count", caption = paste("Data from", params$data_date))
 ```
+
 There are a lot of different types of items.
 As we can see, Armor, Consumables and Weapons are the most common items.
 
@@ -169,7 +243,6 @@ ggplot() +
   geom_boxplot(data = df_crafting_sells, aes(x = 'Sells', y = unit_price_gold)) +
   geom_boxplot(data = df_crafting_buys, aes(x = 'Buys', y = unit_price_gold)) +
   geom_hline(yintercept = 999, linetype="dashed", color = "red") +
-  scale_y_continuous(labels = comma) +
   labs(title = "Outliers on crafting material", subtitle = "Baseline at 999 gold",
     x = "", y = "Price in gold", caption = paste("Data from", params$data_date))
 
@@ -180,7 +253,6 @@ On the other hand, on the sells there are some people who are exaggerating with 
 Let's strip everything at 1000 and above.
 
 ```{r overview_crafting, message=FALSE, warning=FALSE}
-
 df_sells_crafting_material <-  df_sells %>% 
   filter(type == "CraftingMaterial",
          unit_price_gold < 1000) %>% 
