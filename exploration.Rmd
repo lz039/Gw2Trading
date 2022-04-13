@@ -1,0 +1,218 @@
+---
+title: "Data exploration"
+output: html_notebook
+---
+
+# Data Exploration
+
+## Types
+
+```{r type_distribution}
+df_types <- df_sells %>% 
+  distinct(type, name) %>%
+  group_by(type) %>% 
+  count(type)
+
+df_types %>% 
+  ggplot() +
+  geom_bar(aes(x = type, y = n, fill = type), stat='identity') +
+  theme(axis.text.x = element_text(angle = 45, hjust=1), legend.position="bottom") +
+  labs(title = "Type distribution", subtitle = "of all types", fill = "Types",
+    x = "Type", y = "Count", caption = paste("Data from", params$data_date))
+```
+There are a lot of different types of items.
+As we can see, Armor, Consumables and Weapons are the most common items.
+
+This means there are very many different weapon, consumable and armor items in the game, but not that many different crafting materials and upgrade components which seems reasonable.
+
+Armors and Weapons can be further broken down into sub types:
+
+```{r item_type_distribution}
+df_item_types <- df_sells %>% 
+  filter(type %in% c("Armor", "Weapon")) %>% 
+  distinct(type, item_type, item_weight_class, name) %>%
+  group_by(type, item_type, item_weight_class) %>% 
+  count(item_type)
+
+df_item_types %>% 
+  ggplot() +
+  geom_bar(aes(x = item_type, y = n, fill = item_weight_class), stat='identity') +
+  facet_grid(df_item_types$type) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.3, hjust=1)) +
+  labs(title = "Detailed item types", subtitle = "Split by armors and weapons", fill = "Item weight",
+    x = "Item types", y = "Count", caption = paste("Data from", params$data_date))
+
+rm(df_item_types)
+```
+
+For armors we have the distinction between **Light** (for mages), **Medium** (for rangers) and **Heavy** (for warriors). 
+Clothing are special items for the style points.
+There is no such distinction for weapons. Different classes can use different weapons, but all of them can be used by more than one class.
+
+
+## Rarity of items
+
+There are different rarities in Guild Wars that suggest how often this item will occur in the game:
+
+```{r rarity_of_items, message=FALSE, warning=FALSE}
+rarities <- c("Junk", "Basic", "Fine", "Masterwork", "Rare", "Exotic", "Ascended", "Legendary")
+colors <- 
+  c("Junk" = "#a3aeb9",
+    "Basic" = "#000000",
+    "Fine" = "#6a9cd9", 
+    "Masterwork" = "#17911a", 
+    "Rare" = "#f0cd25",
+    "Exotic" = "#e9ad1a",
+    "Ascended" = "#e64680",
+    "Legendary" = "#53238a")
+
+data.frame(rarities) %>% 
+  ggplot() +
+  geom_bar(aes(x = rarities, fill = rarities)) +
+  scale_x_discrete(limits = rarities) +
+  scale_fill_manual("Rarity", values = colors) + 
+  theme(axis.text.y=element_blank(),
+        axis.title.y=element_blank(),
+        axis.title.x=element_blank())
+```
+
+What is obvious by the names, rarity on the left is in general more common than rarity on the right.
+
+One important information is that a lot of very rare items (`Ascended` and `Legendary`) can't be sold to other players. That's the reason we see much more `Rare` and `Exotic` items being sold for high prices than those really rare ones.
+Junk is zero because it can only be sold at non-player vendors.
+
+In our dataset, we have the following distribution:
+
+```{r rarity_distribution}
+df <- df_sells %>% 
+  count(rarity) %>% 
+  arrange(desc(n))
+
+df %>% 
+  ggplot() +
+  geom_bar(aes(x = rarity, y = n, fill = rarity), stat='identity') +
+  scale_x_discrete(limits = rarities) +
+  scale_fill_manual("Rarity", values = colors) +
+  labs(title = "Rarity distribution", subtitle = "of all raritires", fill = "Rarity",
+    x = "Rarity", y = "Count", caption = paste("Data from", params$data_date))
+
+relevant_rarities <- df %>% 
+  filter(n > 100000)
+
+relevant_rarities <- relevant_rarities$rarity
+```
+
+
+## Price distribution
+
+Now let's not only look at the top five items, but at the distribution in general.
+
+```{r rough_price_distribution}
+df_sells_distribution <- df_sells %>% 
+  group_by(name) %>% 
+  summarise(mean_unit_price_gold = mean(unit_price_gold),
+            type = unique(type),
+            rarity = unique(rarity)) %>% 
+  arrange(desc(mean_unit_price_gold))
+  
+df_sells_distribution %>% 
+  ggplot() +
+  geom_histogram(aes(x =  mean_unit_price_gold, fill = type), stat="count") +
+  scale_x_binned(limits = c(0, 1000)) +
+  labs(x = "Mean price", y = "Count",
+       title = "Item price distribution", subtitle = "Items being sold (offers), in gold", 
+       caption = paste("Data from", params$data_date))
+```
+
+As we can see, prices are common between 0 - 100 gold. What we also see is that there are a lot of different types of items.
+We can strip this down so we only see the relevant types.
+
+```{r}
+
+relevant_types <- df_sells_distribution %>% 
+  group_by(type) %>% 
+  count() %>% 
+  filter(n > 350)
+
+df_sells_distribution <- df_sells_distribution %>% 
+  filter(type %in% C(relevant_types$type))
+
+df_sells_distribution %>% 
+  ggplot() +
+  geom_histogram(aes(x =  mean_unit_price_gold, fill = type), stat="count") +
+  scale_x_binned(limits = c(0, 50), breaks = c(0, 10, 25, 50)) +
+  facet_grid(. ~ type) + 
+  labs(x = "Mean price", y = "Count",
+       title = "Item price distribution", subtitle = "Items being sold (offers), in gold", 
+       caption = paste("Data from", params$data_date))
+```
+
+
+
+## Crafting Material
+
+Let's have a closer look on one of the most important resources in the game: Crafting material.
+
+The base material can be collected everywhere in the world from trees, stones or herbs.
+As a player, you can learn up to two professions that can improve those base materials to something better and useful.
+
+Let's first check if there are any outliers in the data that we should clean.
+
+```{r outliers_crafting}
+df_crafting_sells <- df_sells %>% 
+  filter(type == "CraftingMaterial")
+
+df_crafting_buys <- df_buys %>% 
+  filter(type == "CraftingMaterial")
+
+ggplot() +  
+  geom_boxplot(data = df_crafting_sells, aes(x = 'Sells', y = unit_price_gold)) +
+  geom_boxplot(data = df_crafting_buys, aes(x = 'Buys', y = unit_price_gold)) +
+  geom_hline(yintercept = 999, linetype="dashed", color = "red") +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Outliers on crafting material", subtitle = "Baseline at 999 gold",
+    x = "", y = "Price in gold", caption = paste("Data from", params$data_date))
+
+```
+
+We can see that on the buys, there aren't any outliers because the `human brain` is still working and no one buys overpriced goods.
+On the other hand, on the sells there are some people who are exaggerating with the prices.
+Let's strip everything at 1000 and above.
+
+```{r overview_crafting, message=FALSE, warning=FALSE}
+
+df_sells_crafting_material <-  df_sells %>% 
+  filter(type == "CraftingMaterial",
+         unit_price_gold < 1000) %>% 
+  group_by(rarity, name) %>% 
+   summarize(
+    mean_price = mean(unit_price_gold),
+    sum_quantity = sum(quantity),
+    picture = web_image(unique(icon), height = 25)
+  ) %>% 
+  mutate(
+    quantity_label = label_number_si(accuracy=0.1)(sum_quantity),
+    mean_price_gold = round(mean_price, digits = 3)) %>% 
+  arrange(desc(sum_quantity)) %>% 
+  select(rarity, name, mean_price_gold, quantity_label, sum_quantity, picture)
+
+df_sells_crafting_material %>% 
+  datatable(extensions = c('ColReorder', 'Buttons', 'Responsive', 'Scroller', 'SearchPanes', 'Select'),
+            options = list(colReorder = TRUE,
+                           dom = 'Bfrtip', 
+                           buttons = list('searchPanes', 'copy', list(
+                                           extend = 'collection',
+                                           buttons = c('csv', 'excel', 'pdf'), 
+                                           text = 'Download'))),
+            escape = FALSE,
+            colnames=c("#", "Rarity", "Name", "Mean price in gold", "Quantity (short)", "Quantity", "Icon")
+            )
+
+exp_sell_item_name <- df_sells_crafting_material %>% 
+  arrange(desc(mean_price_gold)) %>% 
+  ungroup() %>%
+  select(name) %>% 
+  first() %>% 
+  first()
+
+```

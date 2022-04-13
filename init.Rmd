@@ -242,6 +242,22 @@ We'll just create some more fields for convenience and change some data types.
 
 ### Data corrections
 
+First of all, let's check if there are any n/a values and drop them.
+
+```{r}
+df_sells <- df_sells %>%
+  drop_na(unit_price, quantity)
+
+df_buys <- df_buys %>% 
+  drop_na(unit_price, quantity)
+
+df_sells %>%
+  filter(is.na(unit_price))
+
+df_buys %>%
+  filter(is.na(unit_price))
+```
+
 ![Coins are the basic currency](images/coin.png)
 
 Just like in the real world, where 100 cents are 1 Euro, 
@@ -295,15 +311,29 @@ df_buys <- df_buys %>%
 
 This will make it easier to use their distinct values
 
+There are some numeric values that are hard to compare so let's normalize them
+
+```{r}
+
+df_sells <- df_sells %>% 
+  mutate(level = level / 80,
+         quantity_rel = quantity / max(quantity))
+
+df_buys <- df_buys %>% 
+  mutate(level = level / 80,
+         quantity_rel = quantity / max(quantity))
+```
+
+
+
 Let's check if all data types are correct now.
 
 ```{r}
 vis_dat(df_buys %>%
-  drop_na() %>% 
   unique(), warn_large_data = FALSE)
 ```
 
-Looks good! Because there is no smaller unit than copper, it's fine to have it as integer.
+Looks good! There are some empty values on item_type and item_weight_class which is expected because only some items have this type of category.
 The data frame `df_sells` is a lot bigger and will take a while to compute, but it'll look exactly the same.
 
 ### Creation of new variables
@@ -312,11 +342,9 @@ As described before, to see the variance of orders and offers for one item, we c
 
 ```{r}
 df_buys <- df_buys %>% 
-  group_by(name) %>% 
   mutate(estimation_window = round(max(unit_price_gold)/min(unit_price_gold), digits = 2))
 
 df_sells <- df_sells %>% 
-  group_by(name) %>% 
   mutate(estimation_window = round(max(unit_price_gold)/min(unit_price_gold), digits = 2))
 
 ```
@@ -324,26 +352,29 @@ df_sells <- df_sells %>%
 For our goal to buy low and sell high, we need to know which items have the best profit.
 Therefore we need to `join` buys and sells and calculate the difference between sells and buys (respecting taxes).
 
-```{r merge_buys_sells}
-gc()
+We only take the highest buy orders and the lowest sell orders, because these are the first ones to be bought/sold.
 
-df_all <- df_buys %>%
+```{r merge_buys_sells}
+df_max_buys <-  df_buys %>% 
+  group_by(name) %>% 
+  slice(which.max(unit_price_gold))
+
+df_min_sells <-  df_sells %>% 
+  group_by(name) %>% 
+  slice(which.min(unit_price_gold))
+
+df_all <- df_max_buys %>%
   mutate(quantity_buys = quantity,
          unit_price_gold_buys = unit_price_gold,
          estimation_window_buys = estimation_window) %>% 
   select(-quantity, -unit_price_gold, -estimation_window) %>% 
-  left_join(df_sells %>% 
+  right_join(df_min_sells %>% 
               mutate(quantity_sells = quantity,
                      unit_price_gold_sells = unit_price_gold,
                      estimation_window_sells = estimation_window) %>% 
               select(id, quantity_sells, unit_price_gold_sells, estimation_window_sells), by = "id") %>% 
   mutate(name = name.x) %>% 
   select(-name.x, -name.y)
-
-#cleanup
-rm(df_buys)
-rm(df_sells)
-gc()
 
 ```
 Now we can calculate the profit:
@@ -355,41 +386,13 @@ df_all <- df_all %>%
          more_sells = quantity_sells - quantity_buys)
 ```
 
-We got a lot of data now, let's strip it down a bit. We need to make some assumptions now:
-
-- Only take 3000 most profit items that also have at least 10 more sells than buys.
-
-```{r}
-
-df_top_profit <- df_all %>% 
-    group_by(name) %>% 
-    summarise(profit = round(min(profit), digits = 2),
-              id = unique(id),
-              mean_more_sells = mean(more_sells)) %>% 
-    ungroup() %>% 
-    arrange(desc(profit)) %>%
-    filter(mean_more_sells > 10) %>% 
-    head(3000) %>% 
-    select(id)
-
-df_all_top_profit <- df_all %>% 
-  filter(id %in% df_top_profit$id)
-
-rm(df_top_profit)
-```
 Let's have a look what we have now:
 
 ```{r}
 
-df_top_profit_sells_mean <- df_all_top_profit %>% 
-  group_by(name) %>%
-  summarize(id = unique(id),
-            mean_unit_price_gold_sells = mean(unit_price_gold_sells), 
-            mean_estimation_window_sells = mean(estimation_window_sells))
-
-df_top_profit_sells_mean %>% 
-  ggplot(aes(mean_unit_price_gold_sells, 
-             mean_estimation_window_sells, 
+df_all %>% 
+  ggplot(aes(unit_price_gold_buys, 
+             unit_price_gold_diff, 
              label = id)) +
   geom_point() +
   geom_text(size = 3,
@@ -399,106 +402,73 @@ df_top_profit_sells_mean %>%
   xlab("Mean unit sell prices in gold") +
   ylab("Mean sell estimation window") +
   theme(legend.title=element_blank())
+
+df_all %>% 
+ggplot() +  
+  geom_boxplot(aes(x = 'Sells', y = unit_price_gold_sells)) +
+  geom_boxplot(aes(x = 'Buys', y = unit_price_gold_buys)) +
+  geom_boxplot(aes(x = 'Profit', y = profit)) +
+  geom_hline(yintercept = 3000, linetype="dashed", color = "red") +
+  geom_hline(yintercept = 100, linetype="dashed", color = "blue") +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Outliers on buys and sells", subtitle = "Baseline between 100 and 3000 gold",
+    x = "", y = "Price in gold", caption = paste("Data from", params$data_date))
 ```
 
-
-
-
-## [WIP] Split data
-
-To make the data split reproducible, we set a seed.
-
-We want to predict the gold price based on attributes of the item.
+As we can see there are some very high outliers and a lot of outliers between around 100 and 3000 gold.
+We need to zoom in much more to see the details.
 
 ```{r}
-set.seed(42)
-
-# Put 3/4 of the data into the training set 
-data_split <- initial_split(df_buys, 
-                           prop = 3/4, 
-                           strata = unit_price_gold, 
-                           breaks = 4)
-
-# Create dataframes for the two sets:
-train_data <- training(data_split) 
-test_data <- testing(data_split)
+df_all %>% 
+  subset(profit < 2.5 & unit_price_gold_sells < 2.5) %>% 
+ggplot() +  
+  geom_boxplot(aes(x = 'Sells', y = unit_price_gold_sells)) +
+  geom_text(aes(x = 'Sells', y = median(unit_price_gold_sells), label = median(unit_price_gold_sells)), size = 3, vjust = -1) +
+  geom_boxplot(aes(x = 'Profit', y = profit)) +
+  geom_text(aes(x = 'Profit', y = median(profit), label = median(profit)), size = 3, vjust = -0.5) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Outliers on profit and sells", subtitle = "Limit at 2.5 gold profit and sell price",
+    x = "", y = "Price in gold", caption = paste("Data from", params$data_date))
+```
+```{r}
+df_all %>% 
+  filter(unit_price_gold_buys < 0.1) %>% 
+ggplot() +  
+  geom_boxplot(aes(x = 'Buys', y = unit_price_gold_buys)) +
+  geom_text(aes(x = 'Buys', y = median(unit_price_gold_buys), label = median(unit_price_gold_buys)), size = 3, vjust = 1.5) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Outliers on buys", subtitle = "Baseline at 0.1 gold (10 silver)",
+    x = "", y = "Price in gold", caption = paste("Data from", params$data_date))
 ```
 
-Create validation set (used during modeling)
+We can now strip down the data even further.
+
+Let's take only the items with a realistic profit and strip away the items where it would be better to sell them to the non-player vendor instead of placing them in the auction house.
 
 ```{r}
-cv_folds <- 
-  vfold_cv(train_data,
-           v=5,
-           strata = unit_price_gold,
-           breaks = 4)
+df_all <- df_all %>% 
+  subset(profit > 0.04 & profit < 0.4)
 
-df_train <- train_data 
+df_all <- df_all %>% 
+  subset(profit * 100 > vendor_value) %>% 
+  arrange(desc(profit))
 ```
+Now only `r nrow(df_all)` items left.
 
-Now work with the train data.
+Let's have a closer look at those items.
 
-## Analyze Data
+```{r df_all_overview, message=FALSE, warning=FALSE}
 
-### Types
-
-```{r type_distribution}
-df_types <- df_sells %>% 
-  distinct(type, name) %>%
-  group_by(type) %>% 
-  count(type)
-
-df_types %>% 
-  ggplot() +
-  geom_bar(aes(x = type, y = n, fill = type), stat='identity') +
-  theme(axis.text.x = element_text(angle = 45, hjust=1), legend.position="bottom") +
-  labs(title = "Type distribution", subtitle = "of all types", fill = "Types",
-    x = "Type", y = "Count", caption = paste("Data from", params$data_date))
-```
-There are a lot of different types of items.
-As we can see, Armor, Consumables and Weapons are the most common items.
-
-This means there are very many different weapon, consumable and armor items in the game, but not that many different crafting materials and upgrade components which seems reasonable.
-
-Armors and Weapons can be further broken down into sub types:
-
-```{r item_type_distribution}
-df_item_types <- df_sells %>% 
-  filter(type %in% c("Armor", "Weapon")) %>% 
-  distinct(type, item_type, item_weight_class, name) %>%
-  group_by(type, item_type, item_weight_class) %>% 
-  count(item_type)
-
-df_item_types %>% 
-  ggplot() +
-  geom_bar(aes(x = item_type, y = n, fill = item_weight_class), stat='identity') +
-  facet_grid(df_item_types$type) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.3, hjust=1)) +
-  labs(title = "Detailed item types", subtitle = "Split by armors and weapons", fill = "Item weight",
-    x = "Item types", y = "Count", caption = paste("Data from", params$data_date))
-
-rm(df_item_types)
-```
-
-For armors we have the distinction between **Light** (for mages), **Medium** (for rangers) and **Heavy** (for warriors). 
-Clothing are special items for the style points.
-There is no such distinction for weapons. Different classes can use different weapons, but all of them can be used by more than one class.
-
-Let's have a closer look at one of the types, **Tinket**.
-
-```{r trinket_overview, message=FALSE, warning=FALSE}
-
-df_sells %>%
-  filter(type == "Trinket") %>% 
+df_all %>%
   group_by(type, rarity) %>% 
   summarise(name = unique(name),
-            mean = mean(unit_price_gold),
+            mean = mean(profit),
             icon = min(web_image(icon, height = 50))
             ) %>% 
   drop_na() %>% 
   arrange(desc(mean)) %>%
   gt(rowname_col = "name") %>%
-  tab_header(title = "Trinkets", subtitle = "Items with special means") %>%
+  tab_header(title = "Realistic top profit items", subtitle = "") %>%
   fmt_number(
     columns = mean,
     suffixing = "G"
@@ -527,60 +497,41 @@ df_sells %>%
   )
 ```
 
+## [WIP] Split data
 
-### Rarity of items
+To make the data split reproducible, we set a seed.
 
-There are different rarities in Guild Wars that suggest how often this item will occur in the game:
+We want to predict the gold price based on attributes of the item.
 
-```{r rarity_of_items, message=FALSE, warning=FALSE}
-rarities <- c("Junk", "Basic", "Fine", "Masterwork", "Rare", "Exotic", "Ascended", "Legendary")
-colors <- 
-  c("Junk" = "#a3aeb9",
-    "Basic" = "#000000",
-    "Fine" = "#6a9cd9", 
-    "Masterwork" = "#17911a", 
-    "Rare" = "#f0cd25",
-    "Exotic" = "#e9ad1a",
-    "Ascended" = "#e64680",
-    "Legendary" = "#53238a")
+```{r}
+set.seed(42)
 
-data.frame(rarities) %>% 
-  ggplot() +
-  geom_bar(aes(x = rarities, fill = rarities)) +
-  scale_x_discrete(limits = rarities) +
-  scale_fill_manual("Rarity", values = colors) + 
-  theme(axis.text.y=element_blank(),
-        axis.title.y=element_blank(),
-        axis.title.x=element_blank())
+# Put 3/4 of the data into the training set 
+data_split <- initial_split(df_all, 
+                           prop = 3/4, 
+                           strata = profit, 
+                           breaks = 4)
+
+# Create dataframes for the two sets:
+train_data <- training(data_split) 
+test_data <- testing(data_split)
 ```
 
-What is obvious by the names, rarity on the left is in general more common than rarity on the right.
+Create validation set (used during modeling)
 
-One important information is that a lot of very rare items (`Ascended` and `Legendary`) can't be sold to other players. That's the reason we see much more `Rare` and `Exotic` items being sold for high prices than those really rare ones.
-Junk is zero because it can only be sold at non-player vendors.
+```{r}
+cv_folds <- 
+  vfold_cv(train_data,
+           v=5,
+           strata = profit,
+           breaks = 4)
 
-In our dataset, we have the following distribution:
-
-```{r rarity_distribution}
-df <- df_sells %>% 
-  count(rarity) %>% 
-  arrange(desc(n))
-
-df %>% 
-  ggplot() +
-  geom_bar(aes(x = rarity, y = n, fill = rarity), stat='identity') +
-  scale_x_discrete(limits = rarities) +
-  scale_fill_manual("Rarity", values = colors) +
-  labs(title = "Rarity distribution", subtitle = "of all raritires", fill = "Rarity",
-    x = "Rarity", y = "Count", caption = paste("Data from", params$data_date))
-
-relevant_rarities <- df %>% 
-  filter(n > 100000)
-
-relevant_rarities <- relevant_rarities$rarity
+df_train <- train_data 
 ```
 
+Now work with the train data.
 
+## Analyze Data
 
 ### Item prices
 
@@ -669,93 +620,6 @@ But who doesn't want to look that fancy.
 rm(highest_order)
 rm(highest_offer)
 ```
-
-
-#### [WIP] Price distribution
-
-Now let's not only look at the top five items, but at the distribution in general.
-
-```{r rough_price_distribution}
-df_sells_distribution <- df_sells %>% 
-  group_by(name) %>% 
-  summarise(mean_unit_price_gold = mean(unit_price_gold),
-            type = unique(type),
-            rarity = unique(rarity)) %>% 
-  arrange(desc(mean_unit_price_gold))
-  
-df_sells_distribution %>% 
-  ggplot() +
-  geom_histogram(aes(x =  mean_unit_price_gold, fill = type), stat="count") +
-  scale_x_binned(limits = c(0, 1000)) +
-  labs(x = "Mean price", y = "Count",
-       title = "Item price distribution", subtitle = "Items being sold (offers), in gold", 
-       caption = paste("Data from", params$data_date))
-```
-
-As we can see, prices are common between 0 - 100 gold. What we also see is that there are a lot of different types of items.
-We can strip this down so we only see the relevant types.
-
-```{r}
-
-relevant_types <- df_sells_distribution %>% 
-  group_by(type) %>% 
-  count() %>% 
-  filter(n > 350)
-
-df_sells_distribution <- df_sells_distribution %>% 
-  filter(type %in% C(relevant_types$type))
-
-df_sells_distribution %>% 
-  ggplot() +
-  geom_histogram(aes(x =  mean_unit_price_gold, fill = type), stat="count") +
-  scale_x_binned(limits = c(0, 50), breaks = c(0, 10, 25, 50)) +
-  facet_grid(. ~ type) + 
-  labs(x = "Mean price", y = "Count",
-       title = "Item price distribution", subtitle = "Items being sold (offers), in gold", 
-       caption = paste("Data from", params$data_date))
-```
-
-
-
-#### High profit items
-
-For our goal to buy low and sell high, we need to know which items have the best profit.
-As explained before, because of taxes, profit means `85% of the sell price` - `buy price`.
-
-Let's have a look at the top 100 items with the highest profit.
-As we can see, even the top 100 are very special items that aren't often traded (`quantity` < 10).
-
-This is interesting, but it doesn't seem to be a good fit for real trading.
-
-```{r cost_distribution1, message=FALSE, warning=FALSE}
-df_top_profit <- df_all %>% 
-  group_by(name) %>% 
-  summarise(profit = round(min(profit), digits = 2),
-            id = unique(id),
-            quantity = min(quantity_diff)) %>% 
-  ungroup() %>% 
-  arrange(desc(profit)) %>%
-  head(100)
-
-df_top_profit <- df_top_profit %>%
-  left_join(df_sells %>% select(id, rarity, level, icon), by = "id") %>%
-  mutate(icon = web_image(icon, height = 25)) %>% 
-  select(id, name, profit, rarity, level, quantity, icon) %>% 
-  distinct(id, name, profit, rarity, level, quantity, icon) 
-  
-df_top_profit %>% 
-  datatable(extensions = c('ColReorder', 'Buttons', 'Responsive', 'Scroller', 'SearchPanes', 'Select'),
-            options = list(colReorder = TRUE,
-                           dom = 'Bfrtip', 
-                           buttons = list('searchPanes', 'copy', list(
-                                           extend = 'collection',
-                                           buttons = c('csv', 'excel', 'pdf'), 
-                                           text = 'Download'))),
-            escape = FALSE,
-            colnames=c("#", "Name", "Profit", "Rarity", "Level", "Quantity", "Icon")
-            )
-```
-
 
 #### Find usable items
 
@@ -888,96 +752,3 @@ We created four clusters out of the data.
 
 It's interesting that there are a few items in the "(2) green" cluster that are also lower on profit and would probably also fit in the "(1) red" cluster, but 
 it seems that the "(2) green" cluster is also characterized by a higher price than the "(1) red" one.
-
-
-### Crafting Material
-
-Let's have a closer look on one of the most important resources in the game: Crafting material.
-
-The base material can be collected everywhere in the world from trees, stones or herbs.
-As a player, you can learn up to two professions that can improve those base materials to something better and useful.
-
-Let's first check if there are any outliers in the data that we should clean.
-
-```{r outliers_crafting}
-df_crafting_sells <- df_sells %>% 
-  filter(type == "CraftingMaterial")
-
-df_crafting_buys <- df_buys %>% 
-  filter(type == "CraftingMaterial")
-
-ggplot() +  
-  geom_boxplot(data = df_crafting_sells, aes(x = 'Sells', y = unit_price_gold)) +
-  geom_boxplot(data = df_crafting_buys, aes(x = 'Buys', y = unit_price_gold)) +
-  geom_hline(yintercept = 999, linetype="dashed", color = "red") +
-  scale_y_continuous(labels = comma) +
-  labs(title = "Outliers on crafting material", subtitle = "Baseline at 999 gold",
-    x = "", y = "Price in gold", caption = paste("Data from", params$data_date))
-
-```
-
-We can see that on the buys, there aren't any outliers because the `human brain` is still working and no one buys overpriced goods.
-On the other hand, on the sells there are some people who are exaggerating with the prices.
-Let's strip everything at 1000 and above.
-
-```{r overview_crafting, message=FALSE, warning=FALSE}
-
-df_sells_crafting_material <-  df_sells %>% 
-  filter(type == "CraftingMaterial",
-         unit_price_gold < 1000) %>% 
-  group_by(rarity, name) %>% 
-   summarize(
-    mean_price = mean(unit_price_gold),
-    sum_quantity = sum(quantity),
-    picture = web_image(unique(icon), height = 25)
-  ) %>% 
-  mutate(
-    quantity_label = label_number_si(accuracy=0.1)(sum_quantity),
-    mean_price_gold = round(mean_price, digits = 3)) %>% 
-  arrange(desc(sum_quantity)) %>% 
-  select(rarity, name, mean_price_gold, quantity_label, sum_quantity, picture)
-
-df_sells_crafting_material %>% 
-  datatable(extensions = c('ColReorder', 'Buttons', 'Responsive', 'Scroller', 'SearchPanes', 'Select'),
-            options = list(colReorder = TRUE,
-                           dom = 'Bfrtip', 
-                           buttons = list('searchPanes', 'copy', list(
-                                           extend = 'collection',
-                                           buttons = c('csv', 'excel', 'pdf'), 
-                                           text = 'Download'))),
-            escape = FALSE,
-            colnames=c("#", "Rarity", "Name", "Mean price in gold", "Quantity (short)", "Quantity", "Icon")
-            )
-
-exp_sell_item_name <- df_sells_crafting_material %>% 
-  arrange(desc(mean_price_gold)) %>% 
-  ungroup() %>%
-  select(name) %>% 
-  first() %>% 
-  first()
-
-```
-
-Looking at Crafting Material, we first see that there is an overwhelming amount of offers on the market.
-There are `r df_sells_crafting_material$quantity_label[[1]]` items of `r df_sells_crafting_material$name[[1]]`!
-**Nougat Center**, **Chattering Skull** and **Plastic Fangs** are all Halloween Event items and therefore not hard to get but also not very useful.
-
-The first real crafting material is `Large Claw`, with still over 
-`r df_sells_crafting_material %>%  filter(name == 'Large Claw') %>% ungroup() %>%  select(quantity_label) %>% first()` items.
-
-The most expensive mean crafting material is `r exp_sell_item_name`.
-
-### Feature engineering
-
-Let's summarize what we've learned so far:
-
-- Filter for types: `r relevant_types$type`
-- Filter for rarity: `r relevant_rarities`
-
-
-
-
-
-
-> If possible, it's always better to sell items on the action house instead of the vendor.
--> really?
