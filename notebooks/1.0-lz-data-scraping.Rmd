@@ -1,0 +1,156 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(httr)
+library(jsonlite)
+library(readr)
+```
+
+Is it better to have this as script?
+
+```{r}
+  cat("Starting function.\n")
+  
+  listings_response <- GET("https://api.guildwars2.com/v2/commerce/listings")
+  all_items <-  content(listings_response, "text") %>% fromJSON()
+  
+  item_list <- NULL
+  price_list_buys <- NULL
+  price_list_sells <- NULL
+  
+  cat(paste("Found ", length(all_items), "items in total.\n"))
+  take <- 26800
+  batch_size <- 200 # higher batch sizes are much better. 200 is the maximum.
+  #all_items <- all_items %>% head(take)
+  cat(paste("Took ", length(all_items), "items for processing.\n"))
+  
+  # get price lists
+  for (i in 0:(take/batch_size - 1))
+  {
+    rowBatch <- (batch_size*i + 1):(batch_size * (i + 1))
+    currentBatch <- all_items[rowBatch] %>% 
+      paste(collapse = ",")
+   
+    # get price details
+    price_response <- GET(paste("https://api.guildwars2.com/v2/commerce/listings?ids=",
+                                currentBatch,
+                                sep = ""))
+    
+    if (price_response$status_code != "200" || str_starts(content(price_response, "text"), "<html>"))
+    {
+      cat(paste("Error getting prices in batch ", i, ":", price_response$status_code, 
+                " :: ", price_response, ".\n"))
+      
+      next
+    }
+    
+    price_response_n <- content(price_response, "text") %>% fromJSON()
+    
+    # process price_list_buys
+    for (row in 0:nrow(price_response_n))
+    {
+      id <- price_response_n[row, "id"]
+      buy <- price_response_n[row, "buys"]
+    
+      if (length(buy) > 0)
+      {
+        value <- buy[[1]] %>% 
+          as_tibble(.name_repair = "minimal") %>% 
+          mutate(id = id)
+        
+        price_list_buys <- price_list_buys %>% bind_rows(value)
+      }
+    
+    }
+    
+    # process price_list_sells
+    for (row in 0:nrow(price_response_n))
+    {
+      id <- price_response_n[row, "id"]
+      sell <- price_response_n[row, "sells"]
+    
+      if (length(sell) > 0)
+      {
+        value <- sell[[1]] %>% 
+          as_tibble(.name_repair = "minimal") %>% 
+          mutate(id = id)
+        
+        price_list_sells <- price_list_sells %>% bind_rows(value)
+      }
+    }
+    
+    cat(paste("Getting prices, batch ", i + 1, "/", take/batch_size, ".\n"))
+  }
+  
+  for (i in 0:(take/batch_size - 1))
+  {
+    rowBatch <- (batch_size*i + 1):(batch_size * (i + 1))
+    currentBatch <- all_items[rowBatch] %>% 
+      paste(collapse = ",")
+   
+    # get items details
+    item_response <- GET(paste("https://api.guildwars2.com/v2/items?ids=",
+                               currentBatch,
+                               sep = ""))
+    
+    item_response_n <- content(item_response, "text") %>%
+      fromJSON() %>% 
+      select(any_of(c("name", "description", "type", "rarity",
+                      "vendor_value", "id", "icon", "level", "flags", "details"))) %>% 
+      mutate(
+        id = as.integer(id),
+        vendor_value = as.double(vendor_value)
+      )
+    
+    if (is.null(item_list)) {
+      item_list <- item_response_n
+    } else {
+      item_list <- item_list %>% 
+        add_row(item_response_n)
+    }
+    
+    cat(paste("Getting items, batch ", i + 1, "/", take/batch_size, ".\n"))
+  }
+  
+  item_list <- item_list %>% 
+    mutate(
+      item_type = item_list[["details"]][["type"]],
+      item_weight_class = item_list[["details"]][["weight_class"]],
+           ) %>% 
+    select(-details, -flags, -description)
+ 
+# Filter non-sellable items 
+#  item_list %>% 
+#    mutate(flags_flat = any(flags == "SoulbindOnAcquire"))
+  
+  
+  
+  dir <- getwd()
+  date <- Sys.Date()
+  
+  write_csv(price_list_buys, file = paste(dir, "/../data/raw/gw2-all-buys-raw-", date, ".csv", sep = ""))
+  write_csv(price_list_sells, file = paste(dir, "/../data/raw/gw2-all-sells-raw-", date, ".csv", sep = ""))
+  write_csv(item_list, file = paste(dir, "/../data/raw/gw2-all-items-raw-", date, ".csv", sep = ""))
+```
+
+
+Create full lists by raw csvs
+
+```{r}
+dir <- getwd()
+date <- "2022-04-01"
+
+price_list_buys <- read.csv(paste(dir, "/../data/raw/gw2-all-buys-raw-", date, ".csv", sep = ""))
+price_list_sells <- read.csv(paste(dir, "/../data/raw/gw2-all-sells-raw-", date, ".csv", sep = ""))
+item_list <- read.csv(paste(dir, "/../data/raw/gw2-all-items-raw-", date, ".csv", sep = ""))
+
+item_list_buys <- item_list %>% left_join(price_list_buys)
+item_list_sells <- item_list %>% left_join(price_list_sells)
+  
+rm(dir)
+```
+
