@@ -705,9 +705,13 @@ Great, we found items with very high profit. Let's buy some of them that also ha
 
 See: https://www.tidymodels.org/start/recipes/
 
+Let's make a very basic model that predicts gold sell prices based on gold buy prices.
+
+After testing, the prediction is better when we take only this feature into account in opposite to taking more into account like type, rarity or level. 
+
 ```{r}
 df_train <- train_data %>% 
-  select(id, name, type, rarity, vendor_value, level, quantity_rel, unit_price_gold_sells, unit_price_gold_buys) %>% 
+  select(id, name, unit_price_gold_sells, unit_price_gold_buys) %>% 
   drop_na()
 ```
 
@@ -756,17 +760,19 @@ sells_aug %>%
   select(name, unit_price_gold_sells, .pred)
 
 sells_aug %>% 
-  metrics(truth = unit_price_gold_sells, estimate = .pred) 
+  metrics(truth = unit_price_gold_sells, estimate = .pred)
 ```
+
 ```{r}
 sells_aug %>% 
-  gather(model, prediction, -Sale_Price) %>% 
-  ggplot(aes(x = prediction, y = Sale_Price)) + 
+  select(unit_price_gold_sells, .pred) %>% 
+  gather(model, prediction, -unit_price_gold_sells) %>% 
+  ggplot(aes(x = prediction, y = unit_price_gold_sells)) + 
   geom_abline(col = "green", lty = 2) + 
-  geom_point(alpha = .4) + 
-  facet_wrap(~model) + 
-  coord_fixed()
+  geom_point(alpha = .4)
 ```
+
+What is interesting for us are the prices that are blow the prediction line, meaning that there may be a current low that will probably change in the future.
 
 
 ## Train

@@ -8,7 +8,6 @@ library(shinydashboard)
 library(dplyr)
 library(dbplyr)
 library(purrr)
-library(highcharter)
 library(DT)
 library(htmltools)
 library(tidyverse)
@@ -34,12 +33,18 @@ ui <- dashboardPage(
         fluidRow(
           column(12,
                  selectInput("rarity_input", h3("Rarity"), 
-                             choices = c("All", df$rarity), selected = NULL)),
+                             choices = c("All", df$rarity), selected = NULL))
         ),
         fluidRow(
           column(12,
                  selectInput("type_input", h3("Type"), 
-                             choices = c("All", df$type, selected = NULL)),
+                             choices = c("All", df$type, selected = NULL))
+        ),
+        fluidRow(
+          column(11,
+                 sliderInput("profit_range", h3("Profit in silver"), 
+                             min = 0, max = round(max(df$profit) * 100, 0), value = c(0, round(max(df$profit) * 100, 0)), step = 1)
+                 )
         )
       )
     )
@@ -112,6 +117,9 @@ server <- function(input, output) {
     {
       table_data <- table_data
     }
+    
+    table_data <- table_data %>% 
+      subset((profit*100) >= input$profit_range[1] & (profit*100) <= input$profit_range[2])
     })
   
   output$table <- renderDataTable(table_data())
@@ -141,6 +149,9 @@ server <- function(input, output) {
       plot_profit_data <- plot_profit_data
     }
     
+    plot_profit_data <- plot_profit_data %>% 
+      subset((mean_profit*100) >= input$profit_range[1] & (mean_profit*100) <= input$profit_range[2])
+    
     plot_profit_data %>% 
       ggplot() +
       geom_histogram(aes(x =  mean_profit, fill = type), stat="count") +
@@ -163,5 +174,4 @@ server <- function(input, output) {
   )  
 }
 
-# Run the application 
 shinyApp(ui = ui, server = server)
