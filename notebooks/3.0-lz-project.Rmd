@@ -37,6 +37,10 @@ library(rsample)
 library(tidymodels)
 library(GGally)
 library(corrr)
+library(parsnip)
+
+library(randomForest)
+library(ranger)
 
 tidymodels_prefer()
 ```
@@ -699,15 +703,71 @@ Great, we found items with very high profit. Let's buy some of them that also ha
 
 ## Model
 
+See: https://www.tidymodels.org/start/recipes/
+
 ```{r}
-df_rec <-
-  recipe(profit ~ ., data = train_data) %>%
-  step_impute_median(all_numeric(), -all_outcomes()) %>%
-  step_impute_mode(all_nominal_predictors()) %>%
-  step_normalize(all_numeric(), -all_outcomes()) %>% 
-  step_dummy(all_nominal_predictors()) %>%
-  step_corr(all_predictors(), threshold = 0.7, method = "spearman")
+df_train <- train_data %>% 
+  select(id, name, type, rarity, vendor_value, level, quantity_rel, unit_price_gold_sells, unit_price_gold_buys) %>% 
+  drop_na()
 ```
+
+
+```{r}
+sells_rec <- 
+  recipe(unit_price_gold_sells ~ ., data = df_train) %>% 
+  update_role(id, name, new_role = "ID") %>% 
+  step_dummy(all_nominal_predictors())%>% 
+  step_zv(all_predictors()) %>%  # remove zero vectors
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors())
+
+summary(sells_rec)
+```
+
+```{r}
+# parsnip model
+set.seed(42)
+
+rf_mod <- 
+  rand_forest() %>% 
+  #logistic_reg() %>% 
+  set_engine("ranger") %>% 
+  set_mode("regression")
+
+sells_wflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(sells_rec)
+
+sells_wflow
+```
+
+```{r}
+sells_fit <- 
+  sells_wflow %>% 
+  fit(data = df_train)
+
+predict(sells_fit, test_data)
+
+sells_aug <- 
+  augment(sells_fit, test_data)
+
+sells_aug %>% 
+  select(name, unit_price_gold_sells, .pred)
+
+sells_aug %>% 
+  metrics(truth = unit_price_gold_sells, estimate = .pred) 
+```
+```{r}
+sells_aug %>% 
+  gather(model, prediction, -Sale_Price) %>% 
+  ggplot(aes(x = prediction, y = Sale_Price)) + 
+  geom_abline(col = "green", lty = 2) + 
+  geom_point(alpha = .4) + 
+  facet_wrap(~model) + 
+  coord_fixed()
+```
+
 
 ## Train
 
