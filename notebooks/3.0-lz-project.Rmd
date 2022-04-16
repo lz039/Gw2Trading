@@ -38,6 +38,7 @@ library(tidymodels)
 library(GGally)
 library(corrr)
 library(parsnip)
+library(yardstick)
 
 library(randomForest)
 library(ranger)
@@ -644,140 +645,7 @@ df_train_distribution %>%
        caption = paste("Data from", params$data_date))
 ```
 
-
-#### Find profitable items
-
-Starting with a low budget, we can't buy a lot of high-priced items. Therefore it's good to know which items get the most profit compared to their costs.
-We always suppose *the worst* profit.
-
-```{r}
-df_train_high_roi <-  df_train %>% 
-  group_by(name) %>% 
-  summarise(
-    id = unique(id),
-    profitByCost = min(profit) / max(unit_price_gold_buys),
-    profit = min(profit),
-    cost = max(unit_price_gold_buys) * 100,
-    sell = min(unit_price_gold_sells) * 100,
-    quantity = min(quantity_buys)
-  ) %>% 
-  ungroup() %>% 
-  arrange(desc(profitByCost))
-```
-
-```{r display_high_profit_regression}
-df_train_high_roi %>% 
-  ggplot(aes(x = cost,  y = profit)) +
-  geom_point() +
-  geom_smooth(method='lm', formula= y~x) +
-  labs(x = "Cost", y = "Profit",
-       title = "Cost and Profit of Items", subtitle = "Prices in gold",
-       caption = paste("Data from", params$data_date))
-```
-As we can see, there are some outliers with high costs and low profit, but also some high cost high profit ones.
-
-```{r}
-df_train_high_roi %>% 
-  mutate(
-    profitByCost = round(profitByCost, digits = 2),
-    profit = round(profit, digits = 2),
-    cost = round(cost, digits = 2),
-    sell = round(sell, digits = 2)
-    ) %>% 
-  filter(profit > 0) %>% 
-  select(name, profitByCost, profit, cost, sell, quantity) %>% 
-  datatable(extensions = c('ColReorder', 'Buttons', 'Responsive', 'Scroller', 'SearchPanes', 'Select'),
-            options = list(colReorder = TRUE,
-                           dom = 'Bfrtip', 
-                           buttons = list('searchPanes', 'copy', list(
-                                           extend = 'collection',
-                                           buttons = c('csv', 'excel', 'pdf'), 
-                                           text = 'Download'))),
-            escape = FALSE,
-            colnames=c("Name", "Profit by cost", "Profit", "Cost", "Sell", "Quantity")
-            )
-```
-
-Great, we found items with very high profit. Let's buy some of them that also have a high quantity.
-
-
-## Model
-
-See: https://www.tidymodels.org/start/recipes/
-
-Let's make a very basic model that predicts gold sell prices based on gold buy prices.
-
-After testing, the prediction is better when we take only this feature into account in opposite to taking more into account like type, rarity or level. 
-
-```{r}
-df_train <- train_data %>% 
-  select(id, name, unit_price_gold_sells, unit_price_gold_buys) %>% 
-  drop_na()
-```
-
-
-```{r}
-sells_rec <- 
-  recipe(unit_price_gold_sells ~ ., data = df_train) %>% 
-  update_role(id, name, new_role = "ID") %>% 
-  step_dummy(all_nominal_predictors())%>% 
-  step_zv(all_predictors()) %>%  # remove zero vectors
-  step_center(all_predictors()) %>%
-  step_scale(all_predictors())
-
-summary(sells_rec)
-```
-
-```{r}
-# parsnip model
-set.seed(42)
-
-rf_mod <- 
-  rand_forest() %>% 
-  #logistic_reg() %>% 
-  set_engine("ranger") %>% 
-  set_mode("regression")
-
-sells_wflow <- 
-  workflow() %>% 
-  add_model(rf_mod) %>% 
-  add_recipe(sells_rec)
-
-sells_wflow
-```
-
-```{r}
-sells_fit <- 
-  sells_wflow %>% 
-  fit(data = df_train)
-
-predict(sells_fit, test_data)
-
-sells_aug <- 
-  augment(sells_fit, test_data)
-
-sells_aug %>% 
-  select(name, unit_price_gold_sells, .pred)
-
-sells_aug %>% 
-  metrics(truth = unit_price_gold_sells, estimate = .pred)
-```
-
-```{r}
-sells_aug %>% 
-  select(unit_price_gold_sells, .pred) %>% 
-  gather(model, prediction, -unit_price_gold_sells) %>% 
-  ggplot(aes(x = prediction, y = unit_price_gold_sells)) + 
-  geom_abline(col = "green", lty = 2) + 
-  geom_point(alpha = .4)
-```
-
-What is interesting for us are the prices that are blow the prediction line, meaning that there may be a current low that will probably change in the future.
-
-
-## Train
-
-#### Short Cluster Analysis
+#### Cluster Analysis
 
 To get a better overview how the item cost and profits relate to each other, we'll do a quick cluster analysis.
 
@@ -849,3 +717,151 @@ We created four clusters out of the data.
 - The "(2) green" cluster are low-cost items with high profit (should buys)
 - The "(3) teal" cluster are mid-cost items with different profit
 - The "(4) purple" cluster are high-cost items with a high variance in profit (maybe more outliers)
+
+#### Find profitable items
+
+Starting with a low budget, we can't buy a lot of high-priced items. Therefore it's good to know which items get the most profit compared to their costs.
+We always suppose *the worst* profit.
+
+```{r}
+df_train_high_roi <-  df_train %>% 
+  group_by(name) %>% 
+  summarise(
+    id = unique(id),
+    profitByCost = min(profit) / max(unit_price_gold_buys),
+    profit = min(profit),
+    cost = max(unit_price_gold_buys) * 100,
+    sell = min(unit_price_gold_sells) * 100,
+    quantity = min(quantity_buys)
+  ) %>% 
+  ungroup() %>% 
+  arrange(desc(profitByCost))
+```
+
+```{r display_high_profit_regression}
+df_train_high_roi %>% 
+  ggplot(aes(x = cost,  y = profit)) +
+  geom_point() +
+  geom_smooth(method='lm', formula= y~x) +
+  labs(x = "Cost", y = "Profit",
+       title = "Cost and Profit of Items", subtitle = "Prices in gold",
+       caption = paste("Data from", params$data_date))
+```
+As we can see, there are some outliers with high costs and low profit, but also some high cost high profit ones.
+
+```{r}
+df_train_high_roi %>% 
+  mutate(
+    profitByCost = round(profitByCost, digits = 2),
+    profit = round(profit, digits = 2),
+    cost = round(cost, digits = 2),
+    sell = round(sell, digits = 2)
+    ) %>% 
+  filter(profit > 0) %>% 
+  select(name, profitByCost, profit, cost, sell, quantity) %>% 
+  datatable(extensions = c('ColReorder', 'Buttons', 'Responsive', 'Scroller', 'SearchPanes', 'Select'),
+            options = list(colReorder = TRUE,
+                           dom = 'Bfrtip', 
+                           buttons = list('searchPanes', 'copy', list(
+                                           extend = 'collection',
+                                           buttons = c('csv', 'excel', 'pdf'), 
+                                           text = 'Download'))),
+            escape = FALSE,
+            colnames=c("Name", "Profit by cost", "Profit", "Cost", "Sell", "Quantity")
+            )
+```
+
+Great, we found items with very high profit. Let's buy some of them that also have a high quantity.
+
+
+## Model
+
+### Feature Selection
+
+See: https://www.tidymodels.org/start/recipes/
+
+Let's make a very basic model that predicts gold sell prices based on gold buy prices.
+
+After testing, the prediction is better when we take only `unit_price_gold_buys` feature into account in opposite to taking more into account like `type`, `rarity` or `level`. 
+
+```{r}
+df_train <- train_data %>% 
+  select(id, name, unit_price_gold_sells, unit_price_gold_buys) %>% 
+  drop_na()
+```
+
+We now have one predictor and one outcome. The other fields are for reference if we want to dig deeper into the results of the model.
+
+The recipe creates dummy variables for all nominal predictors, this is useful for `type` and `rarity` but as we kicked those out, it doesn't have any effects.
+
+Same is true for zv which removes n/a vectors which is helpful for `item_type` and `item_weight_class` as these values are not present for all rows, but we don't use these features.
+
+Finally the `unit_price_gold_buys` will be centered and scaled to better work with the algorithm.
+
+```{r}
+sells_rec <- 
+  recipe(unit_price_gold_sells ~ ., data = df_train) %>% 
+  update_role(id, name, new_role = "ID") %>% 
+  step_dummy(all_nominal_predictors())%>% 
+  step_zv(all_predictors()) %>%  # remove zero vectors
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors())
+
+summary(sells_rec)
+```
+
+### Training
+
+We use the `random forest` regression model to train with the `ranger` engine.
+
+```{r}
+# parsnip model
+set.seed(42)
+
+rf_mod <- 
+  rand_forest() %>% 
+  #logistic_reg() %>% 
+  set_engine("ranger") %>% 
+  set_mode("regression")
+
+sells_wflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(sells_rec)
+
+sells_wflow
+```
+
+### Evaluation
+
+We can now fit the train data and check the results. The error values are pretty low.
+
+```{r}
+sells_fit <- 
+  sells_wflow %>% 
+  fit(data = df_train)
+
+predict(sells_fit, test_data)
+
+sells_aug <- 
+  augment(sells_fit, test_data)
+
+sells_aug %>% 
+  select(name, unit_price_gold_sells, .pred)
+
+sells_aug %>% 
+  metrics(truth = unit_price_gold_sells, estimate = .pred)
+```
+
+If we compare predictions with true values, we can see that the model is surprisingly accurate.
+
+```{r}
+sells_aug %>% 
+  select(unit_price_gold_sells, .pred) %>% 
+  gather(model, prediction, -unit_price_gold_sells) %>% 
+  ggplot(aes(x = prediction, y = unit_price_gold_sells)) + 
+  geom_abline(col = "green", lty = 2) + 
+  geom_point(alpha = .4)
+```
+
+What is interesting for us are the prices that are blow the prediction line, meaning that there may be a current low that will probably change in the future.
