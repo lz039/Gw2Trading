@@ -251,7 +251,7 @@ We'll just create some more fields for convenience and change some data types.
 
 First of all, let's check if there are any n/a values and drop them.
 
-```{r}
+```{r filter_na}
 df_sells <- df_sells %>%
   drop_na(unit_price, quantity)
 
@@ -320,7 +320,7 @@ This will make it easier to use their distinct values
 
 There are some numeric values that are hard to compare so let's normalize them
 
-```{r}
+```{r normalize_values }
 
 df_sells <- df_sells %>% 
   mutate(level = level / 80,
@@ -333,7 +333,7 @@ df_buys <- df_buys %>%
 
 Create some helper for feature names.
 
-```{r}
+```{r create_feautre_values }
 feat_cat <- 
   df_sells %>% 
   select(!where(is.numeric), -name, -icon) %>%
@@ -348,7 +348,7 @@ feat_num <-
 
 Let's check if all data types are correct now.
 
-```{r}
+```{r display_data_visdat }
 vis_dat(df_buys %>%
   unique(), warn_large_data = FALSE)
 ```
@@ -360,7 +360,7 @@ The data frame `df_sells` is a lot bigger and will take a while to compute, but 
 
 As described before, to see the variance of orders and offers for one item, we can calculate `High Estimate / Low Estimate`.
 
-```{r}
+```{r create_estimation_window}
 df_buys <- df_buys %>% 
   mutate(estimation_window = round(max(unit_price_gold)/min(unit_price_gold), digits = 2))
 
@@ -399,7 +399,7 @@ df_all <- df_max_buys %>%
 ```
 Now we can calculate the profit:
 
-```{r calculate_diffs}
+```{r create_profit_feature }
 df_all <- df_all %>% 
   mutate(unit_price_gold_diff = unit_price_gold_sells - unit_price_gold_buys,
          profit = 0.85 * unit_price_gold_sells - unit_price_gold_buys,
@@ -408,21 +408,7 @@ df_all <- df_all %>%
 
 Let's have a look what we have now:
 
-```{r}
-
-df_all %>% 
-  ggplot(aes(unit_price_gold_buys, 
-             unit_price_gold_diff, 
-             label = id)) +
-  geom_point() +
-  geom_text(size = 3,
-            check_overlap = FALSE,
-            vjust = 0, nudge_y = 0.1) +
-  theme_classic() +
-  xlab("Mean unit sell prices in gold") +
-  ylab("Mean sell estimation window") +
-  theme(legend.title=element_blank())
-
+```{r plot_outliers}
 df_all %>% 
 ggplot() +  
   geom_boxplot(aes(x = 'Sells', y = unit_price_gold_sells)) +
@@ -438,7 +424,7 @@ ggplot() +
 As we can see there are some very high outliers and a lot of outliers between around 100 and 3000 gold.
 We need to zoom in much more to see the details.
 
-```{r}
+```{r plot_outliers_zoom_sells }
 df_all %>% 
   subset(profit < 2.5 & unit_price_gold_sells < 2.5) %>% 
 ggplot() +  
@@ -450,7 +436,7 @@ ggplot() +
   labs(title = "Outliers on profit and sells", subtitle = "Limit at 2.5 gold profit and sell price",
     x = "", y = "Price in gold", caption = paste("Data from", params$data_date))
 ```
-```{r}
+```{r plot_outliers_zoom_buys }
 df_all %>% 
   filter(unit_price_gold_buys < 0.1) %>% 
 ggplot() +  
@@ -465,7 +451,7 @@ We can now strip down the data even further.
 
 Let's take only the items with a realistic profit and strip away the items where it would be better to sell them to the non-player vendor instead of placing them in the auction house.
 
-```{r}
+```{r filter_by_profit }
 df_all <- df_all %>% 
   subset(profit > 0.04 & profit < 0.4)
 
@@ -478,7 +464,7 @@ Now only `r nrow(df_all)` items left.
 
 We can save this data as processed to quicker start with the analysis later.
 
-```{r}
+```{r write_processed_file }
 dir <- getwd()
 date <- params$data_date
 
@@ -534,7 +520,7 @@ To make the data split reproducible, we set a seed.
 
 We want to predict the gold price based on attributes of the item.
 
-```{r}
+```{r create_data_split}
 set.seed(42)
 
 # Put 3/4 of the data into the training set 
@@ -550,7 +536,7 @@ test_data <- testing(data_split)
 
 Create validation set (used during modeling)
 
-```{r}
+```{r create_cv_folds}
 cv_folds <- 
   vfold_cv(train_data,
            v=5,
@@ -568,10 +554,9 @@ Now work with the train data.
 
 #### [WIP - overview]
 
-
 Not sure if this makes sense.
 
-```{r}
+```{r visualize_data }
 for (i in feat_cat) {
   p <- ggplot(df_train, aes_string(x=i)) +
   geom_bar()
@@ -647,31 +632,27 @@ df_train_distribution %>%
 
 #### Cluster Analysis
 
-To get a better overview how the item cost and profits relate to each other, we'll do a quick cluster analysis.
+To get a better overview how the item buy costs and profits relate to each other, we'll do a quick cluster analysis.
 
 (taken from https://www.kirenz.com/post/2020-05-21-r-hierarchische-clusteranalyse/)
 
 ```{r scale_profit_costs}
-df_cl <- df_train_high_roi %>% 
-  select(c("id", "profit", "cost"))
+df_cl <- df_train %>% 
+  select(c("id", "profit", "unit_price_gold_buys"))
 
-df_cl$profit <- scale(df_cl$profit, center = TRUE, scale = TRUE)
-df_cl$cost <- scale(df_cl$cost, center = TRUE, scale = TRUE)
+# We could sclae but won't get the real values afterwards
+#df_cl$profit <- scale(df_cl$profit, center = TRUE, scale = TRUE)
+#df_cl$unit_price_gold_buys <- scale(df_cl$unit_price_gold_buys, center = TRUE, scale = TRUE)
 
 ```
 
 ```{r plot_items_unclustered}
 df_cl %>% 
-  ggplot(aes(cost, 
-             profit, 
-             label = id)) +
+  ggplot(aes(unit_price_gold_buys, profit)) +
   geom_point() +
-  geom_text(size = 3,
-            check_overlap = FALSE,
-            vjust = 0, nudge_y = 0.1) +
-  theme_classic() +
+  geom_text(aes(label = id), size = 3, check_overlap = FALSE, just = 0, nudge_y = 0.1) +
   ylab("Profit") +
-  xlab("Cost") +
+  xlab("Cost Buys") +
   scale_x_continuous(n.breaks = 20)
 ```
 
@@ -684,7 +665,6 @@ d <-
   dist(method = "euclidean")
 
 hc <- hclust(d, method = "ward.D2") 
-#sort(unique(cophenetic(hc)))
 
 hc$labels <- df_cl$id
 
@@ -698,19 +678,17 @@ rm(grp)
 
 ```{r plot_items_clustered}
 df_cl %>% 
-  ggplot(aes(cost, 
+  ggplot(aes(unit_price_gold_buys, 
              profit, 
-             label = id,
              color = factor(cluster))) +
   geom_point() +
-  geom_text(size = 3,
-            check_overlap = FALSE,
-            vjust = 0, nudge_y = 0.1) +
-  theme_classic() +
-  xlab("Cost") +
+  # geom_text(aes(label = id), size = 3, check_overlap = FALSE, vjust = 0, nudge_y = 0.1) +
+  xlab("Buy Costs") +
   ylab("Profit") +
   theme(legend.title=element_blank())
 ```
+We can see that profit is not a question of buy costs, there are items with high profit for low and for high costs.
+
 We created four clusters out of the data.
 
 - The "(1) red" cluster are low-cost items with low profit (don't buys)
@@ -718,12 +696,13 @@ We created four clusters out of the data.
 - The "(3) teal" cluster are mid-cost items with different profit
 - The "(4) purple" cluster are high-cost items with a high variance in profit (maybe more outliers)
 
+
 #### Find profitable items
 
 Starting with a low budget, we can't buy a lot of high-priced items. Therefore it's good to know which items get the most profit compared to their costs.
 We always suppose *the worst* profit.
 
-```{r}
+```{r get_high_roi }
 df_train_high_roi <-  df_train %>% 
   group_by(name) %>% 
   summarise(
@@ -747,9 +726,10 @@ df_train_high_roi %>%
        title = "Cost and Profit of Items", subtitle = "Prices in gold",
        caption = paste("Data from", params$data_date))
 ```
+
 As we can see, there are some outliers with high costs and low profit, but also some high cost high profit ones.
 
-```{r}
+```{r plot_high_roi_table }
 df_train_high_roi %>% 
   mutate(
     profitByCost = round(profitByCost, digits = 2),
@@ -784,7 +764,7 @@ Let's make a very basic model that predicts gold sell prices based on gold buy p
 
 After testing, the prediction is better when we take only `unit_price_gold_buys` feature into account in opposite to taking more into account like `type`, `rarity` or `level`. 
 
-```{r}
+```{r create_train_model }
 df_train <- train_data %>% 
   select(id, name, unit_price_gold_sells, unit_price_gold_buys) %>% 
   drop_na()
@@ -798,7 +778,7 @@ Same is true for zv which removes n/a vectors which is helpful for `item_type` a
 
 Finally the `unit_price_gold_buys` will be centered and scaled to better work with the algorithm.
 
-```{r}
+```{r create_recipe }
 sells_rec <- 
   recipe(unit_price_gold_sells ~ ., data = df_train) %>% 
   update_role(id, name, new_role = "ID") %>% 
@@ -814,7 +794,7 @@ summary(sells_rec)
 
 We use the `random forest` regression model to train with the `ranger` engine.
 
-```{r}
+```{r ml_workflow }
 # parsnip model
 set.seed(42)
 
@@ -836,7 +816,7 @@ sells_wflow
 
 We can now fit the train data and check the results. The error values are pretty low.
 
-```{r}
+```{r fit_model }
 sells_fit <- 
   sells_wflow %>% 
   fit(data = df_train)
@@ -855,7 +835,7 @@ sells_aug %>%
 
 If we compare predictions with true values, we can see that the model is surprisingly accurate.
 
-```{r}
+```{r visualize_model }
 sells_aug %>% 
   select(unit_price_gold_sells, .pred) %>% 
   gather(model, prediction, -unit_price_gold_sells) %>% 

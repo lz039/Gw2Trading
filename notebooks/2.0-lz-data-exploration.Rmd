@@ -375,3 +375,20 @@ But who doesn't want to look that fancy.
 rm(highest_order)
 rm(highest_offer)
 ```
+
+Plot prices
+
+```{r plot_prices_diff}
+#df_all %>% 
+#  ggplot(aes(unit_price_gold_buys, 
+#             unit_price_gold_diff, 
+#             label = id)) +
+#  geom_point() +
+#  geom_text(size = 3,
+#            check_overlap = FALSE,
+#            vjust = 0, nudge_y = 0.1) +
+#  theme_classic() +
+#  xlab("Mean unit sell prices in gold") +
+#  ylab("Mean sell estimation window") +
+#  theme(legend.title=element_blank())
+```
