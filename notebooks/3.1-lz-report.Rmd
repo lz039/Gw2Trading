@@ -1,0 +1,475 @@
+---
+title: "Insights in the economy of an Massively Multiplayer Online Role-Playing Game"
+author: "Lukas Zaiser"
+params: 
+ institute: "HdM Stuttgart"
+ country: "Germany"
+ year: "2022"
+ data_date: "2022-04-01"
+output:
+ html_document: 
+  css: style.css # define your own css
+  df_print: paged #  tables are printed as HTML tables 
+  highlight: default # syntax highlighting style 
+  number_sections: yes # numbering of sections
+  theme: paper # style option
+  fig_height: 4 # figure height
+  fig_width: 8 # figure width
+  toc: yes # table of content
+  toc_float: 
+    collapsed: true # show full toc
+    smooth_scroll: true # toc scrolling behavior
+  includes:
+    after_body: footer.html # include footer
+---
+
+```{r init, message=FALSE, warning=FALSE, include=FALSE}
+# Basics
+library(tidyverse)
+library(readr)
+library(visdat)
+
+# Plotting
+library(ggplot2)
+library(gt)
+library(gtable)
+library(DT)
+
+# Working with models
+library(rsample)
+library(tidymodels)
+library(GGally)
+library(corrr)
+library(parsnip)
+library(yardstick)
+```
+
+# Summary
+
+In this report I'll give a short overview of the work done during the data science project in `Programming Languages for Data Science`.
+I worked on the whole **Data Science Lifecycle** from the idea to the final insights and model. 
+
+The topic is about **online auctions** using an online game called `Guild Wars 2` as an example. The data was fetched from the Web API provided by the game developers. We talk about around `5.000.000 datasets` so I had to concentrate on the most valuable items first.
+
+The goal was to find out if there are items that can be bought low and sold high to earn (virtual) money. This was pretty much possible with data analysis and visualization. Of cause those items are changing very fast, but as a conclusion I can say it's not possible to buy and sell "the one item", the gains are pretty low and it's only worth it when buying items in bulk.
+
+As the data pretty much contains all data and doesn't yield a real question, for the model part, I wanted to find out and predict at which rate an item can be sold. The sober consideration is that is only depends on the buying price which selling price can be achieved. All other attributes like type, rarity or required level of the item did not have any effect on the outcome.
+
+# Introduction
+
+Malcolm Forbes once said, "Money isn't everything as long as you have enough of it".
+Sure, money doesn't buy happiness, but it can buy a lot of things. This is not only true for the real world, but especially in online games, where micro transactions and payed services have become the new normal. 
+
+More and more games give you the choice to invest a lot of time *or* a lot of money. Both ways you'll somehow achieve the goal of the game faster. In some games you can even exchange digital goods for real money.
+
+To get to the point, having digital currency in games can save you time, stress and even real money.
+
+There are multiple ways to earn money in games.
+One way may be farming, which means hunting special items in high amounts and selling them to other players. Here's the question, which items are worth collecting and can be sold for which prices?
+
+Another way is buying items from other players and reselling them with a higher price tag, just like in the real world.
+Many games have auction houses where those transactions can be made. For this type of income one needs to know what to buy when, which prices are low or high, and when to sell for which amount.
+
+For this project my example of game will be Guild Wars 2. Guild Wars 2 was published in 2012 by NCSoft. There are no monthly fees and the basic game is free to play since 2015. It is a massively multiplayer online role-playing game, meaning a lot of people playing in parallel in an online world. There are over 20.000 items that can be collected and most of them can be sold and bought at the auction house, called the trading post.
+
+![The trading post](images/Trading_Post_home.jpg)
+
+When selling items, 5% of the cost is a fee for the auction house and gets immediately taken from the wallet.
+Each time an item is placed in the auction house, this 5% fee must be payed, so it's best if the items get sold on the first run.
+
+When buying items, 10% of the price goes to the bank before the rest is delivered to the seller.
+
+Because of that it's important to find items where the buy-to-sell price ratio is the highest.
+In addition, as we buy **and** sell, we have to pay the whole 15% taxes which lowers our revenue.
+
+Here is one example:
+
+This is how it works:
+
+1. We want to buy an item so we create a new order with the highest order price (say: 1 gold)
+2. As soon as another player wants to sell this item, the player will sell it to us (for 1 gold)
+3. We then create a new auction for this item using the lowest offer price (say: 2 gold). We have to pay 5% for creating this auction.
+4. As soon as another player wants to buy this item, the player will buy it from us for 2 gold. During this transaction, 10% is a fee for the bank, so we get 10% less.
+
+Overall, we invested `1.05 gold` and earned `1.8 gold`. This is a revenue of (only) `0.75 gold`.
+
+![Coins are the basic currency](images/coin.png)
+
+Just like in the real world, where 100 cents are 1 Euro, the main currency in Guild Wars, coins, are separated into three units.
+There is **copper**, **silver** and **gold**. 
+
+The following values are all the same and are automatically calculated by the game:
+`
+10.000 copper == 100 silver == 1 gold.
+
+For this project, data is generally displayed in gold.
+
+# Working with the data 
+
+## Aquire data
+
+We need to get the data first. We scrap the data from `https://api.guildwars2.com/v2/commerce/`. First we get all `26800` items and, in batches of `200` items per request, get all auctions for these items. It's really important to use the batch endpoint to keep the runtime to a reasonable duration.
+
+```{r load_csv, message=FALSE, warning=FALSE}
+dir <- getwd()
+date <- params$data_date
+
+price_list_buys <- read.csv(paste(dir, "/../data/raw/gw2-all-buys-raw-", date, ".csv", sep = ""))
+price_list_sells <- read.csv(paste(dir, "/../data/raw/gw2-all-sells-raw-", date, ".csv", sep = ""))
+item_list <- read.csv(paste(dir, "/../data/raw/gw2-all-items-raw-", date, ".csv", sep = ""))
+
+df_buys <- item_list %>% left_join(price_list_buys, by = "id")
+df_sells <- item_list %>% left_join(price_list_sells, by = "id")
+
+rm(dir)
+rm(date)
+rm(item_list)
+rm(price_list_sells)
+rm(price_list_buys)
+```
+
+As already said, most of the time we use the price in gold, so we add this feature.
+
+```{r add_price_in_gold}
+df_sells <- df_sells %>% 
+  mutate(unit_price_gold = unit_price / 10000) %>% 
+  select(-unit_price)
+
+df_buys <- df_buys %>% 
+  mutate(unit_price_gold = unit_price / 10000) %>% 
+  select(-unit_price)
+```
+
+After acquiring the data this way we have one file with all the **items**, one with all the **sell orders** (`r nrow(df_sells)`) and one with all the **buy orders** (around `r nrow(df_buys)`). When joining those files together, the amount of data would be enormous.
+
+## Analyze and Filter
+
+Therefore some filtering is required first. We only take the highest buy orders and the lowest sell orders, because these are the first ones to be bought/sold.
+
+```{r filter_buys_sells}
+df_max_buys <-  df_buys %>% 
+  group_by(name) %>% 
+  slice(which.max(unit_price_gold))
+
+df_min_sells <-  df_sells %>% 
+  group_by(name) %>% 
+  slice(which.min(unit_price_gold))
+```
+
+Now we can join the data
+
+```{r merge_buys_sells}
+df_all <- df_max_buys %>%
+  mutate(quantity_buys = quantity,
+         unit_price_gold_buys = unit_price_gold) %>% 
+  select(-quantity, -unit_price_gold) %>% 
+  right_join(df_min_sells %>% 
+              mutate(quantity_sells = quantity,
+                     unit_price_gold_sells = unit_price_gold) %>% 
+              select(id, quantity_sells, unit_price_gold_sells), by = "id") %>% 
+  mutate(name = name.x) %>% 
+  select(-name.x, -name.y)
+
+```
+
+Now we can calculate the profit per item:
+
+```{r create_profit_feature }
+df_all <- df_all %>% 
+  mutate(unit_price_gold_diff = unit_price_gold_sells - unit_price_gold_buys,
+         profit = 0.85 * unit_price_gold_sells - unit_price_gold_buys,
+         more_sells = quantity_sells - quantity_buys)
+```
+
+As we can see there are some very high outliers and a lot of outliers between around 100 and 3000 gold.
+We need to zoom in much more to see the details.
+
+```{r plot_outliers}
+df_all %>% 
+ggplot() +  
+  geom_boxplot(aes(x = 'Sells', y = unit_price_gold_sells)) +
+  geom_boxplot(aes(x = 'Buys', y = unit_price_gold_buys)) +
+  geom_boxplot(aes(x = 'Profit', y = profit)) +
+  geom_hline(yintercept = 3000, linetype="dashed", color = "red") +
+  geom_hline(yintercept = 100, linetype="dashed", color = "blue") +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Outliers on buys and sells", subtitle = "Baseline between 100 and 3000 gold",
+    x = "", y = "Price in gold", caption = paste("Data from", params$data_date))
+```
+
+```{r plot_outliers_zoom_sells }
+df_all %>% 
+  subset(profit < 2.5 & unit_price_gold_sells < 2.5) %>% 
+ggplot() +  
+  geom_boxplot(aes(x = 'Sells', y = unit_price_gold_sells)) +
+  geom_text(aes(x = 'Sells', y = median(unit_price_gold_sells), label = median(unit_price_gold_sells)), size = 3, vjust = -1) +
+  geom_boxplot(aes(x = 'Profit', y = profit)) +
+  geom_text(aes(x = 'Profit', y = median(profit), label = median(profit)), size = 3, vjust = -0.5) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Outliers on profit and sells", subtitle = "Limit at 2.5 gold profit and sell price",
+    x = "", y = "Price in gold", caption = paste("Data from", params$data_date))
+
+median_profit_silver <- round(100 * df_all %>% 
+  drop_na(profit) %>% 
+  summarise(median(profit)) %>% 
+  first(), 2)
+
+median_profit_silver_filter <- round(100 * df_all %>% 
+  subset(profit < 2.5 & unit_price_gold_sells < 2.5) %>% 
+  drop_na(profit) %>% 
+  summarise(median(profit)) %>% 
+  first(), 2)
+```
+
+
+> The median profit is not in the gold range, but at `r median_profit_silver` silver. When filtering with reasonable bounds, the profit even falls down to `r median_profit_silver_filter` silver.
+
+
+We can now strip down the data even further.
+
+Let's take only the items with a realistic profit and strip away the items where it would be better to sell them to the non-player vendor instead of placing them in the auction house.
+
+```{r filter_by_profit }
+df_all <- df_all %>% 
+  subset(profit > 0.04 & profit < 0.4)
+
+df_all <- df_all %>% 
+  subset(profit * 100 > vendor_value) %>% 
+  arrange(desc(profit))
+```
+
+Now only `r nrow(df_all)` items left.
+Let's have a closer look at those items.
+
+> TODO: Summary row with mean doesn't make much sense. Maybe change prices to silver instead of gold.
+
+```{r df_all_overview, message=FALSE, warning=FALSE}
+
+df_all %>%
+  group_by(type, rarity) %>% 
+  summarise(name = unique(name),
+            mean = mean(profit),
+            icon = min(web_image(icon, height = 50))
+            ) %>% 
+  drop_na() %>% 
+  arrange(desc(mean)) %>%
+  gt(rowname_col = "name") %>%
+  tab_header(title = "Realistic top profit items", subtitle = "") %>%
+  fmt_number(
+    columns = mean,
+    suffixing = "G"
+  ) %>% 
+  fmt_markdown(
+    columns = icon
+  ) %>% 
+  summary_rows(
+    columns = mean,
+    fns = list(TOTAL = "sum"),
+    formatter = fmt_number
+  ) %>%
+  tab_footnote(
+    footnote = "Prices in gold",
+    locations = cells_column_labels(columns = mean)
+  ) %>%
+  tab_source_note(
+    "Based on data from api.guildwars2.com"
+  ) %>% 
+  tab_options(
+    summary_row.background.color = "#ACEACE",
+    row_group.background.color = "#FFEFDB",
+    table.layout = "auto",
+    container.overflow.x = TRUE,
+    container.height = px(350)
+  )
+```
+
+# Modeling
+
+## Split data
+
+To make the data split reproducible, we set a seed.
+We want to predict the gold price based on attributes of the items.
+
+```{r create_data_split}
+set.seed(42)
+
+# Put 3/4 of the data into the training set 
+data_split <- initial_split(df_all, 
+                           prop = 3/4, 
+                           strata = profit, 
+                           breaks = 4)
+
+# Create dataframes for the two sets:
+train_data <- training(data_split) 
+test_data <- testing(data_split)
+```
+
+Create validation set (used during modeling)
+
+```{r create_cv_folds}
+cv_folds <- 
+  vfold_cv(train_data,
+           v=5,
+           strata = profit,
+           breaks = 4)
+
+df_train <- train_data 
+```
+
+Now work with the train data.
+
+## Analyze Data
+
+#### Find correlations
+
+```{r spearman_analysis}
+df_train %>% 
+  select(where(is.numeric), -more_sells, -profit, -unit_price_gold_diff) %>% # only select numerical data
+  vis_cor(cor_method = "spearman", na_action = "pairwise.complete.obs")
+```
+
+We see that our data is pretty uncorrelated which makes it hard to find a good classification model. What we see is that buy and sell price are somewhat correlated as well as the level of the item to the vendor value.
+
+The latter makes sense, as there must be some kind of algorithm that sets the sell price, probably also based on the item's level.
+
+> Following idea: A model that predicts the sell price based on the buy price. Then we search for outliers where the sell price was predicted too high. Probably those items are underrated somehow?
+
+#### Price distribution
+
+Let's have a look at the distribution of profit in general for these items.
+
+```{r profit_distribution}
+df_train_distribution <- df_train %>% 
+  group_by(name) %>% 
+  summarise(mean_profit = mean(profit),
+            type = unique(type),
+            rarity = unique(rarity)) %>% 
+  arrange(desc(mean_profit))
+  
+df_train_distribution %>% 
+  ggplot() +
+  geom_histogram(aes(x =  mean_profit, fill = type), stat="count") +
+  scale_x_binned(limits = c(0, 0.4)) +
+  labs(x = "Mean profit", y = "Count",
+       title = "Item profit distribution", subtitle = "Items by profit, in gold", 
+       caption = paste("Data from", params$data_date))
+```
+
+
+#### Cluster Analysis
+
+To get a better overview how the item buy costs and profits relate to each other, we'll do a cluster analysis.
+
+(taken from https://www.kirenz.com/post/2020-05-21-r-hierarchische-clusteranalyse/)
+
+```{r scale_profit_costs}
+df_cl <- df_train %>% 
+  select(c("id", "profit", "unit_price_gold_buys"))
+
+df_cl$profit <- scale(df_cl$profit, center = TRUE, scale = TRUE)
+df_cl$unit_price_gold_buys <- scale(df_cl$unit_price_gold_buys, center = TRUE, scale = TRUE)
+```
+
+```{r calculate_cluster}
+d <- 
+  df_cl %>% 
+  select(-id) %>% 
+  dist(method = "euclidean")
+
+hc <- hclust(d, method = "ward.D2") 
+plot(hc) 
+```
+The dendrogram displays the number of clusters. The higher the number, the less similar are the clusters to each other.
+Because there is a big gap between ~ 5 and ~ 10 which would result in only two clusters, four clusters seem fine.
+
+We can also try six clusters, as two of the clusters seem to be pretty small.
+
+
+```{r plot_items_clustered_4}
+
+hc$labels <- df_cl$id
+
+grp <- cutree(hc, k = 4) 
+df_cl$cluster <- grp
+
+df_cl %>% 
+  ggplot(aes(unit_price_gold_buys, 
+             profit, 
+             color = factor(cluster))) +
+  geom_point() +
+  # geom_text(aes(label = id), size = 3, check_overlap = FALSE, vjust = 0, nudge_y = 0.1) +
+  xlab("Buy Costs") +
+  ylab("Profit") +
+  theme(legend.title=element_blank())
+
+rm(d)
+rm(hc)
+rm(grp)
+```
+Because we scaled the numbers we can't really say something about the real value of the items, but most of them are in the lower cost / lower profit range.
+
+Four clusters were created out of the data:
+
+- The "(1) red" cluster are low-cost items with low profit (don't buys)
+- The "(2) green" cluster are high-cost items with a high variance in profit (maybe more outliers)
+- The "(3) teal" cluster are mid-cost items with different profit
+- The "(4) purple" cluster are low-cost items with high profit (should buys)
+
+> The profit is not a question of buy costs, there are items with high profit for low and for high costs. 
+
+> There are some items that are cheap but will bring good profit.
+
+#### Find profitable items
+
+Starting with a low budget, we can't buy a lot of high-priced items. Therefore it's good to know which items get the most profit compared to their costs.
+We always suppose *the worst* profit.
+
+```{r get_high_roi }
+df_train_high_roi <-  df_train %>% 
+  group_by(name) %>% 
+  summarise(
+    id = unique(id),
+    profitByCost = min(profit) / max(unit_price_gold_buys),
+    profit = min(profit),
+    cost = max(unit_price_gold_buys) * 100,
+    sell = min(unit_price_gold_sells) * 100,
+    quantity = min(quantity_buys)
+  ) %>% 
+  ungroup() %>% 
+  arrange(desc(profitByCost))
+```
+
+```{r display_high_profit_regression}
+df_train_high_roi %>% 
+  ggplot(aes(x = cost,  y = profit)) +
+  geom_point() +
+  geom_smooth(method='lm', formula= y~x) +
+  labs(x = "Cost", y = "Profit",
+       title = "Cost and Profit of Items", subtitle = "Prices in gold",
+       caption = paste("Data from", params$data_date))
+```
+
+This is basically the same picture we saw earlier on cluster analysis, but with the real profit values.
+
+```{r plot_high_roi_table }
+df_train_high_roi %>% 
+  mutate(
+    profitByCost = round(profitByCost, digits = 2),
+    profit = round(profit, digits = 2),
+    cost = round(cost, digits = 2),
+    sell = round(sell, digits = 2)
+    ) %>% 
+  filter(profit > 0) %>% 
+  select(name, profitByCost, profit, cost, sell, quantity) %>% 
+  datatable(extensions = c('ColReorder', 'Buttons', 'Responsive', 'Scroller', 'SearchPanes', 'Select'),
+            options = list(colReorder = TRUE,
+                           dom = 'Bfrtip', 
+                           buttons = list('searchPanes', 'copy', list(
+                                           extend = 'collection',
+                                           buttons = c('csv', 'excel', 'pdf'), 
+                                           text = 'Download'))),
+            escape = FALSE,
+            colnames=c("Name", "Profit by cost", "Profit", "Cost", "Sell", "Quantity")
+            )
+```
+Great, we found items with very high profit. Let's buy some of them that also have a high quantity.
