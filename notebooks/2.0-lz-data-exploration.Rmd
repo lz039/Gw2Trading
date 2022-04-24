@@ -59,6 +59,7 @@ rm(price_list_buys)
 
 ```{r}
 df_sells <- df_sells %>% 
+  drop_na(unit_price, quantity) %>% 
   mutate(rarity = as.factor(rarity),
          type = as.factor(type),
          item_type = as.factor(item_type),
@@ -67,6 +68,7 @@ df_sells <- df_sells %>%
   select(-unit_price)
 
 df_buys <- df_buys %>% 
+  drop_na(unit_price, quantity) %>% 
   mutate(rarity = as.factor(rarity),
          type = as.factor(type),
          item_type = as.factor(item_type),

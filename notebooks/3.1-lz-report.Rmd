@@ -106,7 +106,7 @@ For this project, data is generally displayed in gold.
 
 # Working with the data 
 
-## Aquire data
+## Data ingestion
 
 We need to get the data first. We scrap the data from `https://api.guildwars2.com/v2/commerce/`. First we get all `26800` items and, in batches of `200` items per request, get all auctions for these items. It's really important to use the batch endpoint to keep the runtime to a reasonable duration.
 
@@ -128,21 +128,33 @@ rm(price_list_sells)
 rm(price_list_buys)
 ```
 
+First we clean the data and change some feature types.
 As already said, most of the time we use the price in gold, so we add this feature.
 
-```{r add_price_in_gold}
+```{r data_cleaning }
 df_sells <- df_sells %>% 
-  mutate(unit_price_gold = unit_price / 10000) %>% 
+  drop_na(unit_price, quantity) %>% 
+  mutate(rarity = as.factor(rarity),
+         type = as.factor(type),
+         item_type = as.factor(item_type),
+         item_weight_class = as.factor(item_weight_class),
+         unit_price_gold = unit_price / 10000) %>% 
   select(-unit_price)
 
 df_buys <- df_buys %>% 
-  mutate(unit_price_gold = unit_price / 10000) %>% 
+  drop_na(unit_price, quantity) %>% 
+  mutate(rarity = as.factor(rarity),
+         type = as.factor(type),
+         item_type = as.factor(item_type),
+         item_weight_class = as.factor(item_weight_class),
+         unit_price_gold = unit_price / 10000) %>% 
   select(-unit_price)
 ```
 
+
 After acquiring the data this way we have one file with all the **items**, one with all the **sell orders** (`r nrow(df_sells)`) and one with all the **buy orders** (around `r nrow(df_buys)`). When joining those files together, the amount of data would be enormous.
 
-## Analyze and Filter
+### Filter on highest buy and lowest sell orders
 
 Therefore some filtering is required first. We only take the highest buy orders and the lowest sell orders, because these are the first ones to be bought/sold.
 
@@ -156,9 +168,9 @@ df_min_sells <-  df_sells %>%
   slice(which.min(unit_price_gold))
 ```
 
-Now we can join the data
+Now we can join the sell and buy orders and calculate the profit per item according to the tax rules described earlier.
 
-```{r merge_buys_sells}
+```{r merge_buys_sells, message=FALSE, warning=FALSE}
 df_all <- df_max_buys %>%
   mutate(quantity_buys = quantity,
          unit_price_gold_buys = unit_price_gold) %>% 
@@ -171,8 +183,6 @@ df_all <- df_max_buys %>%
   select(-name.x, -name.y)
 
 ```
-
-Now we can calculate the profit per item:
 
 ```{r create_profit_feature }
 df_all <- df_all %>% 
@@ -224,6 +234,7 @@ median_profit_silver_filter <- round(100 * df_all %>%
 
 > The median profit is not in the gold range, but at `r median_profit_silver` silver. When filtering with reasonable bounds, the profit even falls down to `r median_profit_silver_filter` silver.
 
+### Filter on realistic profits
 
 We can now strip down the data even further.
 
@@ -248,28 +259,29 @@ Let's have a closer look at those items.
 df_all %>%
   group_by(type, rarity) %>% 
   summarise(name = unique(name),
-            mean = mean(profit),
+            profit = profit * 100,
             icon = min(web_image(icon, height = 50))
             ) %>% 
   drop_na() %>% 
-  arrange(desc(mean)) %>%
+  arrange(desc(profit)) %>%
   gt(rowname_col = "name") %>%
   tab_header(title = "Realistic top profit items", subtitle = "") %>%
   fmt_number(
-    columns = mean,
-    suffixing = "G"
+    columns = profit,
+    suffixing = "S"
   ) %>% 
   fmt_markdown(
     columns = icon
   ) %>% 
   summary_rows(
-    columns = mean,
-    fns = list(TOTAL = "sum"),
+    groups = TRUE,
+    columns = profit,
+    fns = list(average = "mean"),
     formatter = fmt_number
   ) %>%
   tab_footnote(
-    footnote = "Prices in gold",
-    locations = cells_column_labels(columns = mean)
+    footnote = "Prices in silver",
+    locations = cells_column_labels(columns = profit)
   ) %>%
   tab_source_note(
     "Based on data from api.guildwars2.com"
@@ -283,9 +295,7 @@ df_all %>%
   )
 ```
 
-# Modeling
-
-## Split data
+## Data splitting
 
 To make the data split reproducible, we set a seed.
 We want to predict the gold price based on attributes of the items.
@@ -304,7 +314,9 @@ train_data <- training(data_split)
 test_data <- testing(data_split)
 ```
 
-Create validation set (used during modeling)
+We also create a validation set using the CV_fold method that is used during modeling.
+
+### >TODO: use cs_folds somewhere ??
 
 ```{r create_cv_folds}
 cv_folds <- 
@@ -316,11 +328,11 @@ cv_folds <-
 df_train <- train_data 
 ```
 
-Now work with the train data.
+From now on we will work with the train data (`df_train`).
 
-## Analyze Data
+## Analyze data
 
-#### Find correlations
+### Find correlations
 
 ```{r spearman_analysis}
 df_train %>% 
@@ -334,9 +346,9 @@ The latter makes sense, as there must be some kind of algorithm that sets the se
 
 > Following idea: A model that predicts the sell price based on the buy price. Then we search for outliers where the sell price was predicted too high. Probably those items are underrated somehow?
 
-#### Price distribution
+### Price distribution
 
-Let's have a look at the distribution of profit in general for these items.
+Let's have a look at the distribution of profit in general for these items. We can see that the types are distributed pretty evenly within our small profit range.
 
 ```{r profit_distribution}
 df_train_distribution <- df_train %>% 
@@ -356,7 +368,7 @@ df_train_distribution %>%
 ```
 
 
-#### Cluster Analysis
+### Cluster Analysis
 
 To get a better overview how the item buy costs and profits relate to each other, we'll do a cluster analysis.
 
@@ -419,7 +431,7 @@ Four clusters were created out of the data:
 
 > There are some items that are cheap but will bring good profit.
 
-#### Find profitable items
+### Find profitable items
 
 Starting with a low budget, we can't buy a lot of high-priced items. Therefore it's good to know which items get the most profit compared to their costs.
 We always suppose *the worst* profit.
@@ -431,8 +443,8 @@ df_train_high_roi <-  df_train %>%
     id = unique(id),
     profitByCost = min(profit) / max(unit_price_gold_buys),
     profit = min(profit),
-    cost = max(unit_price_gold_buys) * 100,
-    sell = min(unit_price_gold_sells) * 100,
+    cost = max(unit_price_gold_buys),
+    sell = min(unit_price_gold_sells),
     quantity = min(quantity_buys)
   ) %>% 
   ungroup() %>% 
@@ -451,13 +463,15 @@ df_train_high_roi %>%
 
 This is basically the same picture we saw earlier on cluster analysis, but with the real profit values.
 
+Let's have a closer look at those items. Because the prices are in the lower silver range again, they are displayed as silver here:
+
 ```{r plot_high_roi_table }
 df_train_high_roi %>% 
   mutate(
     profitByCost = round(profitByCost, digits = 2),
-    profit = round(profit, digits = 2),
-    cost = round(cost, digits = 2),
-    sell = round(sell, digits = 2)
+    profit = round(profit * 100, digits = 2),
+    cost = round(cost * 100, digits = 2),
+    sell = round(sell * 100, digits = 2)
     ) %>% 
   filter(profit > 0) %>% 
   select(name, profitByCost, profit, cost, sell, quantity) %>% 
@@ -469,7 +483,205 @@ df_train_high_roi %>%
                                            buttons = c('csv', 'excel', 'pdf'), 
                                            text = 'Download'))),
             escape = FALSE,
-            colnames=c("Name", "Profit by cost", "Profit", "Cost", "Sell", "Quantity")
+            colnames=c("Name", "Profit by cost", "Profit", "Buy costs", "Sell revenue", "Quantity")
             )
 ```
 Great, we found items with very high profit. Let's buy some of them that also have a high quantity.
+
+## Model
+
+### Feature Selection
+
+As we saw while analyzing the data, the features are uncorrelated except buy and sell prices.
+
+After testing, the prediction is even better when we take only the `unit_price_gold_buys` feature into account in opposite to taking more features into account like `type`, `rarity` or `level`. To make this clear, we first take all features and look for correlations.
+
+```{r create_train_model }
+df_train <- train_data %>% 
+  select(id, name, unit_price_gold_sells, unit_price_gold_buys, type, rarity, level) %>% 
+  drop_na()
+```
+
+```{r create_recipe }
+sells_rec <- 
+  recipe(unit_price_gold_sells ~ ., data = df_train) %>% 
+  update_role(id, name, new_role = "ID") %>% 
+  step_dummy(all_nominal_predictors())%>% 
+  step_zv(all_predictors()) %>%  # remove zero vectors
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors())
+
+summary(sells_rec)
+```
+
+We now have four predictors and one outcome. The other fields are for reference if we want to dig deeper into the results of the model.
+
+The recipe creates dummy variables for all nominal predictors, this is useful for `type` and `rarity`.
+
+`zv` would removes all n/a vectors which would be helpful for `item_type` and `item_weight_class` as these values are not present for all rows, but we don't use these features.
+
+Finally the `unit_price_gold_buys` will be centered and scaled to better work with the algorithm.
+
+### Training
+
+We use the `random forest` regression model to train with the `ranger` engine, and the `linear regression` model using the `glmnet` engine.
+In opposite to the `glm` engine, `glmnet` only supports inputs with more than one predictor.
+
+```{r ml_workflow }
+# parsnip model
+set.seed(42)
+
+rf_mod <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>% 
+  set_mode("regression")
+
+lasso_mod <- 
+  linear_reg(penalty = 0.1, mixture = 1) %>% 
+  set_engine("glmnet")
+
+sells_wflow <- 
+  workflow() %>% 
+  add_recipe(sells_rec) 
+
+rf_wflow <- 
+  sells_wflow %>% 
+  add_model(rf_mod)
+
+
+lasso_wflow <- 
+  sells_wflow %>% 
+  add_model(lasso_mod)
+
+rf_wflow
+lasso_wflow
+```
+
+### Evaluation
+
+We can now fit the train data and check the results with our two different models.
+
+One for random forest:
+
+```{r fit_rf_model }
+sells_fit <- 
+  rf_wflow %>% 
+  fit(data = df_train)
+
+sells_rf_aug <- 
+  augment(sells_fit, test_data)
+
+sells_rf_aug %>% 
+  select(name, unit_price_gold_sells, .pred)
+
+sells_rf_aug %>% 
+  metrics(truth = unit_price_gold_sells, estimate = .pred)
+```
+
+One for lasso:
+
+```{r fit_lasso_model }
+sells_fit <- 
+  lasso_wflow %>% 
+  fit(data = df_train)
+
+sells_lasso_aug <- 
+  augment(sells_fit, test_data)
+
+sells_lasso_aug %>% 
+  select(name, unit_price_gold_sells, .pred)
+
+sells_lasso_aug %>% 
+  metrics(truth = unit_price_gold_sells, estimate = .pred)
+```
+
+Comparing the errors of those two engines, the random forest algorithm has a much higher root mean square error and mean absolute error.
+Both models are overwhelmingly exact, random forest on 94% of the time and lasso on 99,988%.
+
+```{r}
+sells_fit %>%
+  extract_fit_parsnip() %>%
+  tidy()
+```
+
+Now we have it in numbers that the only feature that has influence on our prediction is the buying price.
+Maybe we can change this using hyper parameter tuning.
+
+### Tuning
+
+```{r}
+set.seed(1234)
+
+sells_boot <- bootstraps(df_train)
+
+tune_spec <- linear_reg(penalty = tune(), mixture = 1) %>%
+  set_engine("glmnet")
+
+lambda_grid <- grid_regular(penalty(), levels = 50)
+```
+
+```{r}
+doParallel::registerDoParallel()
+
+set.seed(2020)
+
+lasso_grid <- 
+  tune_grid(
+  sells_wflow %>% 
+    add_model(tune_spec),
+    resamples = sells_boot,
+    grid = lambda_grid
+)
+
+lasso_grid %>%
+  collect_metrics()
+```
+
+```{r}
+lasso_grid %>%
+  collect_metrics() %>%
+  ggplot(aes(penalty, mean, color = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err,
+                    ymax = mean + std_err),
+                alpha = 0.5) +
+  geom_line(size = 1.5) +
+  facet_wrap(~.metric, scales = "free", nrow = 2) +
+  scale_x_log10() +
+  theme(legend.position = "none")
+```
+
+Well bad luck, nothing to gain here. The rmse even raises after too much tuning.
+
+Nonetheless, the error values are already pretty low.
+
+```{r visualize_model }
+
+sells_join_aug <- sells_lasso_aug %>% 
+  select(id = id, lasso_pred = .pred, unit_price_gold_sells) %>% 
+  left_join(sells_rf_aug %>% select(id = id, rf_pred = .pred), by = "id")
+
+sells_join_aug %>%  
+  ggplot() +
+  geom_point(aes(x = rf_pred, y = unit_price_gold_sells), color = "#05541a") +
+  geom_point(aes(x = lasso_pred, y = unit_price_gold_sells), color = "#040552") +
+  geom_abline(col = "red", lty = 2) +
+  labs(x = "Prediction", y = "Gold value",
+       title = "Item price predictions", subtitle = "Using random forest and lasso regressions",
+       color = c("A", "B"),
+       caption = paste("Data from", params$data_date))
+```
+
+What is interesting for us are the prices that are blow the prediction line, meaning that there may be a current low that will probably change in the future.
+
+### Evaluate on test set
+
+Do the last fit on the test data. We changed no parameter so the output should be the same as before.
+
+```{r}
+# final evaluation with test data
+last_fit_lasso <- last_fit(lasso_wflow, split = data_split)
+
+# show RMSE and RSQ
+last_fit_lasso %>% 
+  collect_metrics()
+```
