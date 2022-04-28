@@ -44,6 +44,9 @@ library(GGally)
 library(corrr)
 library(parsnip)
 library(yardstick)
+
+# own functions
+source("../libs/prepare_data.R")
 ```
 
 ```{r}
@@ -491,7 +494,6 @@ df_train_high_roi %>%
             colnames=c("Name", "Profit by cost", "Profit", "Buy costs", "Sell revenue", "Quantity")
             )
 ```
-Great, we found items with very high profit. Let's buy some of them that also have a high quantity.
 
 ## Model
 
@@ -690,3 +692,57 @@ last_fit_lasso <- last_fit(lasso_wflow, split = data_split)
 last_fit_lasso %>% 
   collect_metrics()
 ```
+
+
+## Use Model on new data
+
+We can now try to use a whole new dataset and let the model run on that one.
+
+```{r load_csv, message=FALSE, warning=FALSE}
+dir <- getwd()
+date <- "2022-04-06"
+
+price_list_buys <- read.csv(paste(dir, "/../data/raw/gw2-all-buys-raw-", date, ".csv", sep = ""))
+price_list_sells <- read.csv(paste(dir, "/../data/raw/gw2-all-sells-raw-", date, ".csv", sep = ""))
+item_list <- read.csv(paste(dir, "/../data/raw/gw2-all-items-raw-", date, ".csv", sep = ""))
+
+df_buys <- item_list %>% left_join(price_list_buys, by = "id")
+df_sells <- item_list %>% left_join(price_list_sells, by = "id")
+
+rm(dir)
+rm(item_list)
+rm(price_list_sells)
+rm(price_list_buys)
+```
+
+Do the whole data cleaning in one function.
+
+```{r}
+df_all <- prepare_data(df_sells, df_buys)
+```
+
+Run the model again
+
+```{r}
+sells_lasso_aug <- 
+  augment(sells_fit, df_all)
+
+sells_lasso_aug %>% 
+  select(name, unit_price_gold_sells, .pred)
+
+sells_lasso_aug %>% 
+  metrics(truth = unit_price_gold_sells, estimate = .pred)
+```
+
+```{r}
+sells_lasso_aug %>%  
+  ggplot() +
+  geom_point(aes(x = .pred * 100, y = unit_price_gold_sells * 100)) +
+  geom_abline(col = "red", lty = 2) +
+  labs(x = "Prediction", y = "Gold value",
+       title = "Item price predictions", subtitle = "Using lasso regressions")
+```
+
+> Buy and sell prices are really closely correlated. Therefore it's easy for the model to predict them. 
+
+> There are no outliers, the market regulates itself.
