@@ -15,6 +15,8 @@ output:
   theme: paper # style option
   fig_height: 4 # figure height
   fig_width: 8 # figure width
+  fig_caption: false
+  code_download: true
   toc: yes # table of content
   toc_float: 
     collapsed: true # show full toc
@@ -43,6 +45,11 @@ library(corrr)
 library(parsnip)
 library(yardstick)
 ```
+
+```{r}
+knitr::opts_chunk$set(class.source = "code-chunks")
+```
+
 
 # Summary
 
@@ -104,7 +111,7 @@ The following values are all the same and are automatically calculated by the ga
 
 For this project, data is generally displayed in gold.
 
-# Working with the data 
+# Working with the data
 
 ## Data ingestion
 
@@ -251,8 +258,6 @@ df_all <- df_all %>%
 
 Now only `r nrow(df_all)` items left.
 Let's have a closer look at those items.
-
-> TODO: Summary row with mean doesn't make much sense. Maybe change prices to silver instead of gold.
 
 ```{r df_all_overview, message=FALSE, warning=FALSE}
 
