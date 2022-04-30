@@ -47,11 +47,11 @@ library(randomForest)
 library(ranger)
 library(glmnet)
 
+# own functions
+source("../libs/prepare_data.R")
+
 tidymodels_prefer()
 ```
-# TODOs
-
-
 
 Using the data science lifecycle of **plan**, **data**, **model** and **deployment**, I want to provide insights into many aspects of data science, programming in R and the world of the online game Guild Wars 2.
 
@@ -555,11 +555,7 @@ Now work with the train data.
 
 ## Analyze Data
 
-### Item prices
-
-#### [WIP - overview]
-
-Not sure if this makes sense.
+Create different plots for overview
 
 ```{r visualize_data }
 for (i in feat_cat) {
@@ -578,7 +574,7 @@ df_train %>%
 
 ```
 
-#### Find correlations
+### Find correlations
 
 ```{r spearman_analysis}
 df_train %>% 
@@ -592,7 +588,7 @@ The latter makes sense, as there must be some kind of algorithm that sets the se
 
 Following idea: A model that predicts the sell price based on the buy price. Then we search for outliers where the sell price was predicted too high. Probably those items are underrated somehow?
 
-#### Price distribution
+### Price distribution
 
 Let's have a look at the distribution of profit in general for these items.
 
@@ -606,14 +602,14 @@ df_train_distribution <- df_train %>%
   
 df_train_distribution %>% 
   ggplot() +
-  geom_histogram(aes(x =  mean_profit, fill = type), stat="count") +
+  geom_bar(aes(x =  mean_profit, fill = type), stat="count") +
   scale_x_binned(limits = c(0, 0.4)) +
   labs(x = "Mean profit", y = "Count",
        title = "Item profit distribution", subtitle = "Items by profit, in gold", 
        caption = paste("Data from", params$data_date))
 ```
 
-#### Sell distribution 
+### Sell distribution 
 
 ```{r sell_distribution}
 
@@ -636,33 +632,18 @@ df_train_distribution %>%
        caption = paste("Data from", params$data_date))
 ```
 
-#### Cluster Analysis
+### Cluster Analysis
 
-To get a better overview how the item buy costs and profits relate to each other, we'll do a quick cluster analysis.
-
+To get a better overview how the item buy costs and profits relate to each other, we'll do a cluster analysis.
 (taken from https://www.kirenz.com/post/2020-05-21-r-hierarchische-clusteranalyse/)
 
 ```{r scale_profit_costs}
 df_cl <- df_train %>% 
   select(c("id", "profit", "unit_price_gold_buys"))
 
-# We could sclae but won't get the real values afterwards
-#df_cl$profit <- scale(df_cl$profit, center = TRUE, scale = TRUE)
-#df_cl$unit_price_gold_buys <- scale(df_cl$unit_price_gold_buys, center = TRUE, scale = TRUE)
-
+df_cl$profit <- scale(df_cl$profit, center = TRUE, scale = TRUE)
+df_cl$unit_price_gold_buys <- scale(df_cl$unit_price_gold_buys, center = TRUE, scale = TRUE)
 ```
-
-```{r plot_items_unclustered}
-df_cl %>% 
-  ggplot(aes(unit_price_gold_buys, profit)) +
-  geom_point() +
-  geom_text(aes(label = id), size = 3, check_overlap = FALSE, just = 0, nudge_y = 0.1) +
-  ylab("Profit") +
-  xlab("Cost Buys") +
-  scale_x_continuous(n.breaks = 20)
-```
-
-Because we scaled the numbers we can't really say something about the real value of the items, but most of them are in the lower cost / lower profit range.
 
 ```{r calculate_cluster}
 d <- 
@@ -671,18 +652,22 @@ d <-
   dist(method = "euclidean")
 
 hc <- hclust(d, method = "ward.D2") 
+plot(hc) 
+```
+
+The dendrogram displays the number of clusters. The higher the height on y-axis, the less similar are the clusters to each other.
+Because there is a big gap between ~ 5 and ~ 10 which would result in only two clusters, four clusters seem fine.
+
+We can also try six clusters, as two of the clusters seem to be pretty small.
+
+
+```{r plot_items_clustered_4}
 
 hc$labels <- df_cl$id
 
 grp <- cutree(hc, k = 4) 
 df_cl$cluster <- grp
 
-rm(d)
-rm(hc)
-rm(grp)
-```
-
-```{r plot_items_clustered}
 df_cl %>% 
   ggplot(aes(unit_price_gold_buys, 
              profit, 
@@ -692,18 +677,21 @@ df_cl %>%
   xlab("Buy Costs") +
   ylab("Profit") +
   theme(legend.title=element_blank())
-```
 
-We can see that profit is not a question of buy costs, there are items with high profit for low and for high costs.
-We created four clusters out of the data.
+rm(d)
+rm(hc)
+rm(grp)
+```
+Because we scaled the numbers we can't really say something about the real value of the items, but most of them are in the lower cost / lower profit range.
+
+Four clusters were created out of the data:
 
 - The "(1) red" cluster are low-cost items with low profit (don't buys)
-- The "(2) green" cluster are low-cost items with high profit (should buys)
+- The "(2) green" cluster are high-cost items with a high variance in profit (maybe more outliers)
 - The "(3) teal" cluster are mid-cost items with different profit
-- The "(4) purple" cluster are high-cost items with a high variance in profit (maybe more outliers)
+- The "(4) purple" cluster are low-cost items with high profit (should buys)
 
-
-#### Find profitable items
+### Find profitable items
 
 Starting with a low budget, we can't buy a lot of high-priced items. Therefore it's good to know which items get the most profit compared to their costs.
 We always suppose *the worst* profit.
@@ -717,7 +705,8 @@ df_train_high_roi <-  df_train %>%
     profit = min(profit),
     cost = max(unit_price_gold_buys),
     sell = min(unit_price_gold_sells),
-    quantity = min(quantity_buys)
+    quantity = min(quantity_buys),
+    icon = unique(icon)
   ) %>% 
   ungroup() %>% 
   arrange(desc(profitByCost))
@@ -743,10 +732,11 @@ df_train_high_roi %>%
     profitByCost = round(profitByCost, digits = 2),
     profit = round(profit * 100, digits = 2),
     cost = round(cost * 100, digits = 2),
-    sell = round(sell * 100, digits = 2)
+    sell = round(sell * 100, digits = 2),
+    icon = paste("<img src=\"", icon, "\" height=\"52\"></img>")
     ) %>% 
   filter(profit > 0) %>% 
-  select(name, profitByCost, profit, cost, sell, quantity) %>% 
+  select(icon, name, profitByCost, profit, cost, sell, quantity) %>% 
   datatable(extensions = c('ColReorder', 'Buttons', 'Responsive', 'Scroller', 'SearchPanes', 'Select'),
             options = list(colReorder = TRUE,
                            dom = 'Bfrtip', 
@@ -755,7 +745,7 @@ df_train_high_roi %>%
                                            buttons = c('csv', 'excel', 'pdf'), 
                                            text = 'Download'))),
             escape = FALSE,
-            colnames=c("Name", "Profit by cost", "Profit", "Buy costs", "Sell revenue", "Quantity")
+            colnames=c("Icon", "Name", "Profit by cost", "Profit", "Buy costs", "Sell revenue", "Quantity")
             )
 ```
 
@@ -958,4 +948,53 @@ last_fit_lasso <- last_fit(lasso_wflow, split = data_split)
 # show RMSE and RSQ
 last_fit_lasso %>% 
   collect_metrics()
+```
+
+## Use Model on new data
+
+We can now try to use a whole new dataset and let the model run on that one.
+
+```{r load_csv_2, message=FALSE, warning=FALSE}
+dir <- getwd()
+date <- "2022-04-06"
+
+price_list_buys <- read.csv(paste(dir, "/../data/raw/gw2-all-buys-raw-", date, ".csv", sep = ""))
+price_list_sells <- read.csv(paste(dir, "/../data/raw/gw2-all-sells-raw-", date, ".csv", sep = ""))
+item_list <- read.csv(paste(dir, "/../data/raw/gw2-all-items-raw-", date, ".csv", sep = ""))
+
+df_buys <- item_list %>% left_join(price_list_buys, by = "id")
+df_sells <- item_list %>% left_join(price_list_sells, by = "id")
+
+rm(dir)
+rm(item_list)
+rm(price_list_sells)
+rm(price_list_buys)
+```
+
+Do the whole data cleaning in one function.
+
+```{r prepare_data_2}
+df_all <- prepare_data(df_sells, df_buys)
+```
+
+Run the model again
+
+```{r run_model_2 }
+sells_lasso_aug <- 
+  augment(sells_fit, df_all)
+
+sells_lasso_aug %>% 
+  select(name, unit_price_gold_sells, .pred)
+
+sells_lasso_aug %>% 
+  metrics(truth = unit_price_gold_sells, estimate = .pred)
+```
+
+```{r evaluate_model_2 }
+sells_lasso_aug %>%  
+  ggplot() +
+  geom_point(aes(x = .pred * 100, y = unit_price_gold_sells * 100)) +
+  geom_abline(col = "red", lty = 2) +
+  labs(x = "Prediction", y = "Gold value",
+       title = "Item price predictions", subtitle = "Using lasso regressions")
 ```

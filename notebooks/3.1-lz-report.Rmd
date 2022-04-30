@@ -47,6 +47,8 @@ library(yardstick)
 
 # own functions
 source("../libs/prepare_data.R")
+
+tidymodels_prefer()
 ```
 
 ```{r}
@@ -61,9 +63,9 @@ I worked on the whole **Data Science Lifecycle** from the idea to the final insi
 
 The topic is about **online auctions** using an online game called `Guild Wars 2` as an example. The data was fetched from the Web API provided by the game developers. We talk about around `5.000.000 datasets` so I had to concentrate on the most valuable items first.
 
-The goal was to find out if there are items that can be bought low and sold high to earn (virtual) money. This was pretty much possible with data analysis and visualization. Of cause those items are changing very fast, but as a conclusion I can say it's not possible to buy and sell "the one item", the gains are pretty low and it's only worth it when buying items in bulk.
+The goal was to find out if there are items that can be bought low and sold high to earn (virtual) money. This was pretty much possible only with data analysis and visualization. Of cause those items are changing very fast, but as a conclusion I can say it's not possible to buy and sell "the one item", the gains are pretty low and it's only worth it when buying items in bulk.
 
-As the data pretty much contains all data and doesn't yield a real question, for the model part, I wanted to find out and predict at which rate an item can be sold. The sober consideration is that is only depends on the buying price which selling price can be achieved. All other attributes like type, rarity or required level of the item did not have any effect on the outcome.
+As the data pretty much contains all data and doesn't yield a real question, for the model part, I wanted to find out and predict at which rate an item can be sold. The sober consideration is that it only depends on the buying price which selling price can be achieved. All other attributes like type, rarity or required level of the item did not have any effect on the outcome.
 
 # Introduction
 
@@ -162,7 +164,7 @@ df_buys <- df_buys %>%
 ```
 
 
-After acquiring the data this way we have one file with all the **items**, one with all the **sell orders** (`r nrow(df_sells)`) and one with all the **buy orders** (around `r nrow(df_buys)`). When joining those files together, the amount of data would be enormous.
+After acquiring the data this way we have one file with all the **items**, one with all the **sell orders** (`r nrow(df_sells)`) and one with all the **buy orders** (`r nrow(df_buys)`). When joining those files together, the amount of data would be enormous.
 
 ### Filter on highest buy and lowest sell orders
 
@@ -201,10 +203,8 @@ df_all <- df_all %>%
          more_sells = quantity_sells - quantity_buys)
 ```
 
-As we can see there are some very high outliers and a lot of outliers between around 100 and 3000 gold.
-We need to zoom in much more to see the details.
 
-```{r plot_outliers}
+```{r plot_outliers, message=FALSE, warning=FALSE}
 df_all %>% 
 ggplot() +  
   geom_boxplot(aes(x = 'Sells', y = unit_price_gold_sells)) +
@@ -216,6 +216,9 @@ ggplot() +
   labs(title = "Outliers on buys and sells", subtitle = "Baseline between 100 and 3000 gold",
     x = "", y = "Price in gold", caption = paste("Data from", params$data_date))
 ```
+
+As we can see there are some very high outliers and a lot of outliers between around 100 and 3000 gold.
+We need to zoom in much more to see the details.
 
 ```{r plot_outliers_zoom_sells }
 df_all %>% 
@@ -242,7 +245,7 @@ median_profit_silver_filter <- round(100 * df_all %>%
 ```
 
 
-> The median profit is not in the gold range, but at `r median_profit_silver` silver. When filtering with reasonable bounds, the profit even falls down to `r median_profit_silver_filter` silver.
+> The median profit is not in the gold range, but at `r median_profit_silver` silver. When filtering with reasonable bounds, the profit even falls to `r median_profit_silver_filter` silver.
 
 ### Filter on realistic profits
 
@@ -273,7 +276,7 @@ df_all %>%
   drop_na() %>% 
   arrange(desc(profit)) %>%
   gt(rowname_col = "name") %>%
-  tab_header(title = "Realistic top profit items", subtitle = "") %>%
+  tab_header(title = "Realistic top profit items", subtitle = "by type and rarity") %>%
   fmt_number(
     columns = profit,
     suffixing = "S"
@@ -299,7 +302,7 @@ df_all %>%
     row_group.background.color = "#FFEFDB",
     table.layout = "auto",
     container.overflow.x = TRUE,
-    container.height = px(350)
+    container.height = px(450)
   )
 ```
 
@@ -352,7 +355,7 @@ We see that our data is pretty uncorrelated which makes it hard to find a good c
 
 The latter makes sense, as there must be some kind of algorithm that sets the sell price, probably also based on the item's level.
 
-> Following idea: A model that predicts the sell price based on the buy price. Then we search for outliers where the sell price was predicted too high. Probably those items are underrated somehow?
+> Following idea: A model that predicts the sell price based on the buy price. Then we search for outliers where the sell price was predicted too high. Maybe those items are underrated somehow?
 
 ### Price distribution
 
@@ -368,7 +371,7 @@ df_train_distribution <- df_train %>%
   
 df_train_distribution %>% 
   ggplot() +
-  geom_histogram(aes(x =  mean_profit, fill = type), stat="count") +
+  geom_bar(aes(x =  mean_profit, fill = type), stat="count") +
   scale_x_binned(limits = c(0, 0.4)) +
   labs(x = "Mean profit", y = "Count",
        title = "Item profit distribution", subtitle = "Items by profit, in gold", 
@@ -379,8 +382,12 @@ df_train_distribution %>%
 ### Cluster Analysis
 
 To get a better overview how the item buy costs and profits relate to each other, we'll do a cluster analysis.
-
 (taken from https://www.kirenz.com/post/2020-05-21-r-hierarchische-clusteranalyse/)
+
+We use z-transformation to bring the mean to 0 and varianz of the variables to 1.
+
+![Z-Transformation](images/ztransformation.jpeg)
+
 
 ```{r scale_profit_costs}
 df_cl <- df_train %>% 
@@ -399,7 +406,8 @@ d <-
 hc <- hclust(d, method = "ward.D2") 
 plot(hc) 
 ```
-The dendrogram displays the number of clusters. The higher the number, the less similar are the clusters to each other.
+
+The dendrogram displays the number of clusters. The higher the height on y-axis, the less similar are the clusters to each other.
 Because there is a big gap between ~ 5 and ~ 10 which would result in only two clusters, four clusters seem fine.
 
 We can also try six clusters, as two of the clusters seem to be pretty small.
@@ -418,8 +426,8 @@ df_cl %>%
              color = factor(cluster))) +
   geom_point() +
   # geom_text(aes(label = id), size = 3, check_overlap = FALSE, vjust = 0, nudge_y = 0.1) +
-  xlab("Buy Costs") +
-  ylab("Profit") +
+  xlab("Buy Costs transformed") +
+  ylab("Profit transformed") +
   theme(legend.title=element_blank())
 
 rm(d)
@@ -453,7 +461,8 @@ df_train_high_roi <-  df_train %>%
     profit = min(profit),
     cost = max(unit_price_gold_buys),
     sell = min(unit_price_gold_sells),
-    quantity = min(quantity_buys)
+    quantity = min(quantity_buys),
+    icon = unique(icon)
   ) %>% 
   ungroup() %>% 
   arrange(desc(profitByCost))
@@ -470,6 +479,7 @@ df_train_high_roi %>%
 ```
 
 This is basically the same picture we saw earlier on cluster analysis, but with the real profit values.
+A line for linear models is added to see which values worthy (above the line) and which ones are not.
 
 Let's have a closer look at those items. Because the prices are in the lower silver range again, they are displayed as silver here:
 
@@ -479,10 +489,11 @@ df_train_high_roi %>%
     profitByCost = round(profitByCost, digits = 2),
     profit = round(profit * 100, digits = 2),
     cost = round(cost * 100, digits = 2),
-    sell = round(sell * 100, digits = 2)
+    sell = round(sell * 100, digits = 2),
+    icon = paste("<img src=\"", icon, "\" height=\"52\"></img>")
     ) %>% 
   filter(profit > 0) %>% 
-  select(name, profitByCost, profit, cost, sell, quantity) %>% 
+  select(icon, name, profitByCost, profit, cost, sell, quantity) %>% 
   datatable(extensions = c('ColReorder', 'Buttons', 'Responsive', 'Scroller', 'SearchPanes', 'Select'),
             options = list(colReorder = TRUE,
                            dom = 'Bfrtip', 
@@ -491,7 +502,7 @@ df_train_high_roi %>%
                                            buttons = c('csv', 'excel', 'pdf'), 
                                            text = 'Download'))),
             escape = FALSE,
-            colnames=c("Name", "Profit by cost", "Profit", "Buy costs", "Sell revenue", "Quantity")
+            colnames=c("Icon", "Name", "Profit by cost", "Profit", "Buy costs", "Sell revenue", "Quantity")
             )
 ```
 
@@ -605,7 +616,7 @@ sells_lasso_aug %>%
 Comparing the errors of those two engines, the random forest algorithm has a much higher root mean square error and mean absolute error.
 Both models are overwhelmingly exact, random forest on 94% of the time and lasso on 99,988%.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 sells_fit %>%
   extract_fit_parsnip() %>%
   tidy()
@@ -615,6 +626,8 @@ Now we have it in numbers that the only feature that has influence on our predic
 Maybe we can change this using hyper parameter tuning.
 
 ### Tuning
+
+Therefore we are tuning with 50 different levels of parameters.
 
 ```{r}
 set.seed(1234)
@@ -673,7 +686,7 @@ sells_join_aug %>%
   geom_point(aes(x = lasso_pred, y = unit_price_gold_sells), color = "#040552") +
   geom_abline(col = "red", lty = 2) +
   labs(x = "Prediction", y = "Gold value",
-       title = "Item price predictions", subtitle = "Using random forest and lasso regressions",
+       title = "Item price predictions", subtitle = "Using random forest (green) and lasso regressions (blue)",
        color = c("A", "B"),
        caption = paste("Data from", params$data_date))
 ```
@@ -698,7 +711,7 @@ last_fit_lasso %>%
 
 We can now try to use a whole new dataset and let the model run on that one.
 
-```{r load_csv, message=FALSE, warning=FALSE}
+```{r load_csv_2, message=FALSE, warning=FALSE}
 dir <- getwd()
 date <- "2022-04-06"
 
@@ -717,13 +730,13 @@ rm(price_list_buys)
 
 Do the whole data cleaning in one function.
 
-```{r}
+```{r prepare_data_2, message=FALSE, warning=FALSE}
 df_all <- prepare_data(df_sells, df_buys)
 ```
 
 Run the model again
 
-```{r}
+```{r run_model_2 }
 sells_lasso_aug <- 
   augment(sells_fit, df_all)
 
@@ -734,15 +747,21 @@ sells_lasso_aug %>%
   metrics(truth = unit_price_gold_sells, estimate = .pred)
 ```
 
-```{r}
+```{r evaluate_model_2 }
 sells_lasso_aug %>%  
   ggplot() +
   geom_point(aes(x = .pred * 100, y = unit_price_gold_sells * 100)) +
   geom_abline(col = "red", lty = 2) +
   labs(x = "Prediction", y = "Gold value",
-       title = "Item price predictions", subtitle = "Using lasso regressions")
+       title = "Item price predictions", subtitle = "using lasso regressions")
 ```
 
 > Buy and sell prices are really closely correlated. Therefore it's easy for the model to predict them. 
 
 > There are no outliers, the market regulates itself.
+
+# Outcome
+
+The dataset behaved very differently than I tought. There is a lot of data but the really relevant parts are only highest sell and lowest buy prices.
+Auctions are changing so fast that static analysis isn't a good fit. After creating an auction it didn't take long until others were undercutting my prices.
+Therefore I was not able to reach my gold of earning `18 gold and 6 silver (worth 1$)`. There are still some running auctions but after all I even have `1 gold 43 silver and 56 copper` less. In addition, this method is really time consuming checking auctions now and then, and it doesn't really spark joy. It's clear that I'm not the first and only one who tries to earn money that way, which gets obvious when looking at existing fan pages like [GW2Efficiency](https://gw2efficiency.com/tradingpost) and [GW2TP](https://de.gw2tp.com/).
