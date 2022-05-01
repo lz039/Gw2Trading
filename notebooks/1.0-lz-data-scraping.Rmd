@@ -3,16 +3,14 @@ title: "R Notebook"
 output: html_notebook
 ---
 
-```{r}
+```{r load_packages }
 library(tidyverse)
 library(httr)
 library(jsonlite)
 library(readr)
 ```
 
-Is it better to have this as script?
-
-```{r}
+```{r data_scraping }
   cat("Starting function.\n")
   
   listings_response <- GET("https://api.guildwars2.com/v2/commerce/listings")
@@ -140,7 +138,7 @@ Is it better to have this as script?
 
 Create full lists by raw csvs
 
-```{r}
+```{r load_data_test }
 dir <- getwd()
 date <- "2022-04-01"
 

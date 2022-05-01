@@ -862,7 +862,7 @@ sells_lasso_aug %>%
 Comparing the errors of those two engines, the random forest algorithm has a much higher root mean square error and mean absolute error.
 Both models are overwhelmingly exact, random forest on 94% of the time and lasso on 99,988%.
 
-```{r}
+```{r feature_influence }
 sells_fit %>%
   extract_fit_parsnip() %>%
   tidy()
@@ -873,7 +873,7 @@ Maybe we can change this using hyper parameter tuning.
 
 ### Tuning
 
-```{r}
+```{r tuning_bootstrap }
 set.seed(1234)
 
 sells_boot <- bootstraps(df_train)
@@ -884,7 +884,7 @@ tune_spec <- linear_reg(penalty = tune(), mixture = 1) %>%
 lambda_grid <- grid_regular(penalty(), levels = 50)
 ```
 
-```{r}
+```{r tuning_grid }
 doParallel::registerDoParallel()
 
 set.seed(2020)
@@ -901,7 +901,7 @@ lasso_grid %>%
   collect_metrics()
 ```
 
-```{r}
+```{r tuning_metrics }
 lasso_grid %>%
   collect_metrics() %>%
   ggplot(aes(penalty, mean, color = .metric)) +
@@ -941,7 +941,7 @@ What is interesting for us are the prices that are blow the prediction line, mea
 
 Do the last fit on the test data. We changed no parameter so the output should be the same as before.
 
-```{r}
+```{r last_fit}
 # final evaluation with test data
 last_fit_lasso <- last_fit(lasso_wflow, split = data_split)
 
