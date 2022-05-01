@@ -791,6 +791,8 @@ Finally the `unit_price_gold_buys` will be centered and scaled to better work wi
 We use the `random forest` regression model to train with the `ranger` engine, and the `linear regression` model using the `glmnet` engine.
 In opposite to the `glm` engine, `glmnet` only supports inputs with more than one predictor.
 
+The `glmnet` engine does not only produce a normal linear regression but a lasso (least absolute shrinkage and selection operator) regression. There the input features are shrinked and therefore less important features do not influence the model that much.
+
 ```{r ml_workflow }
 # parsnip model
 set.seed(42)
@@ -858,6 +860,15 @@ sells_lasso_aug %>%
 sells_lasso_aug %>% 
   metrics(truth = unit_price_gold_sells, estimate = .pred)
 ```
+
+```{r save-model}
+dir <- getwd()
+date <- params$data_date
+
+write_csv(sells_lasso_aug, file = paste(dir, "/../data/processed/gw2-lasso-model-result-", date, ".csv", sep = ""))
+write_csv(sells_rf_aug, file = paste(dir, "/../data/processed/gw2-rf-model-result-", date, ".csv", sep = ""))
+```
+
 
 Comparing the errors of those two engines, the random forest algorithm has a much higher root mean square error and mean absolute error.
 Both models are overwhelmingly exact, random forest on 94% of the time and lasso on 99,988%.
@@ -980,6 +991,9 @@ df_all <- prepare_data(df_sells, df_buys)
 Run the model again
 
 ```{r run_model_2 }
+# returns the same as augment
+# predict(sells_fit, new_data = df_all)
+
 sells_lasso_aug <- 
   augment(sells_fit, df_all)
 

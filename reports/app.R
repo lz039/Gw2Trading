@@ -8,19 +8,16 @@ library(shinydashboard)
 library(dplyr)
 library(dbplyr)
 library(purrr)
-library(DT)
 library(htmltools)
 library(tidyverse)
 library(readr)
-library(ggplot2)
-library(gt)
-library(gtable)
-library(DT)
 
 dir <- getwd()
 date <- "2022-04-01"
 
 df <- read.csv(paste(dir, "/../data/processed/gw2-all-processed-2022-04-01", ".csv", sep = ""))
+sells_lasso_aug <- read.csv(paste(dir, "/../data/processed/gw2-lasso-model-result-2022-04-01", ".csv", sep = ""))
+sells_rf_aug <- read.csv(paste(dir, "/../data/processed/gw2-rf-model-result-2022-04-01", ".csv", sep = ""))
 
 # Define UI for application that draws a histogram
 ui <- dashboardPage(
@@ -45,6 +42,12 @@ ui <- dashboardPage(
                  sliderInput("profit_range", h3("Profit in silver"), 
                              min = 0, max = round(max(df$profit) * 100, 0), value = c(0, round(max(df$profit) * 100, 0)), step = 1)
                  )
+        ),
+        fluidRow(
+          column(11,
+                 sliderInput("prediction_range", h3("Prediction in gold"), 
+                             min = 0, max = round(max(sells_lasso_aug$.pred), 0), value = c(0, round(max(sells_lasso_aug$.pred), 0)), step = 1)
+          )
         )
       )
     )
@@ -91,7 +94,23 @@ ui <- dashboardPage(
                 plotOutput("outliers")
               )
             )
+          ),
+        tabPanel(
+          title = "Model Dashboard",
+          value = "page3",
+          fluidRow(
+            column(
+              width = 12,
+              h2("Model predictions on profit")
+            )
+          ),
+          fluidRow(
+            column(
+              width = 12,
+              plotOutput("plot_model")
+            )
           )
+        )
       )
     )
 )
@@ -154,13 +173,35 @@ server <- function(input, output) {
     
     plot_profit_data %>% 
       ggplot() +
-      geom_histogram(aes(x =  mean_profit, fill = type), stat="count") +
+      geom_bar(aes(x =  mean_profit, fill = type), stat="count") +
       scale_x_binned(limits = c(0, 0.4)) +
       labs(x = "Mean profit", y = "Count",
            title = "Item profit distribution", subtitle = "Items by profit, in gold")
   })
   
   output$price_distribution <- renderPlot(plot())
+  
+  # Plot for model
+  plot_model <- reactive({
+    sells_join_aug <- sells_lasso_aug %>% 
+      select(id = id, lasso_pred = .pred, unit_price_gold_sells) %>% 
+      left_join(sells_rf_aug %>% select(id = id, rf_pred = .pred), by = "id")
+    
+    sells_join_aug <- sells_join_aug %>% 
+      subset((rf_pred) >= input$prediction_range[1] & (rf_pred) <= input$prediction_range[2]) %>% 
+      subset((lasso_pred) >= input$prediction_range[1] & (lasso_pred) <= input$prediction_range[2])
+      
+    sells_join_aug %>%  
+      ggplot() +
+      geom_point(aes(x = rf_pred, y = unit_price_gold_sells), color = "#05541a") +
+      geom_point(aes(x = lasso_pred, y = unit_price_gold_sells), color = "#040552") +
+      geom_abline(col = "red", lty = 2) +
+      labs(x = "Prediction", y = "Gold value",
+           title = "Item price predictions", subtitle = "Using random forest and lasso regressions",
+           color = c("A", "B"))
+  })
+    
+  output$plot_model <- renderPlot(plot_model())
 
   # Outliers
   output$outliers <- renderPlot(df %>% 
