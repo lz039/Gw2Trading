@@ -28,6 +28,10 @@ ui <- dashboardPage(
     dashboardSidebar(
       sidebarMenu(
         fluidRow(
+          column(2),
+          column(10, h2("Global filters"))
+        ),
+        fluidRow(
           column(12,
                  selectInput("rarity_input", h3("Rarity"), 
                              choices = c("All", df$rarity), selected = NULL))
@@ -36,18 +40,6 @@ ui <- dashboardPage(
           column(12,
                  selectInput("type_input", h3("Type"), 
                              choices = c("All", df$type, selected = NULL))
-        ),
-        fluidRow(
-          column(11,
-                 sliderInput("profit_range", h3("Profit in silver"), 
-                             min = 0, max = round(max(df$profit) * 100, 0), value = c(0, round(max(df$profit) * 100, 0)), step = 1)
-                 )
-        ),
-        fluidRow(
-          column(11,
-                 sliderInput("prediction_range", h3("Prediction in gold"), 
-                             min = 0, max = round(max(sells_lasso_aug$.pred), 0), value = c(0, round(max(sells_lasso_aug$.pred), 0)), step = 1)
-          )
         )
       )
     )
@@ -75,26 +67,12 @@ ui <- dashboardPage(
             ),
             column(
               width = 5,
-              plotOutput("price_distribution")
+              plotOutput("price_distribution"),
+              sliderInput("profit_range", h3("Profit in silver"), 
+                          min = 0, max = round(max(df$profit) * 100, 0), value = c(0, round(max(df$profit) * 100, 0)), step = 1)
             )
           )
         ),
-          tabPanel(
-            title = "Outliers Dashboard",
-            value = "page2",
-            fluidRow(
-              column(
-                width = 6,
-                h2("Outliers on profit and sells")
-              )
-            ),
-            fluidRow(
-              column(
-                width = 6,
-                plotOutput("outliers")
-              )
-            )
-          ),
         tabPanel(
           title = "Model Dashboard",
           value = "page3",
@@ -108,6 +86,12 @@ ui <- dashboardPage(
             column(
               width = 12,
               plotOutput("plot_model")
+            )
+          ),
+          fluidRow(
+            column(12,
+                   sliderInput("prediction_range", h3("Prediction in gold"), 
+                               min = 0, max = round(max(sells_lasso_aug$.pred), 0), value = c(0, round(max(sells_lasso_aug$.pred), 0)), step = 1)
             )
           )
         )
@@ -184,8 +168,24 @@ server <- function(input, output) {
   # Plot for model
   plot_model <- reactive({
     sells_join_aug <- sells_lasso_aug %>% 
-      select(id = id, lasso_pred = .pred, unit_price_gold_sells) %>% 
+      select(id = id, lasso_pred = .pred, unit_price_gold_sells, rarity, type) %>% 
       left_join(sells_rf_aug %>% select(id = id, rf_pred = .pred), by = "id")
+    
+    if (input$rarity_input != "All"){
+      sells_join_aug <- sells_join_aug %>% subset(rarity == input$rarity_input)
+    }
+    else
+    {
+      sells_join_aug <- sells_join_aug
+    }
+    
+    if (input$type_input != "All"){
+      sells_join_aug <- sells_join_aug %>% subset(type == input$type_input)
+    }
+    else
+    {
+      sells_join_aug <- sells_join_aug
+    }
     
     sells_join_aug <- sells_join_aug %>% 
       subset((rf_pred) >= input$prediction_range[1] & (rf_pred) <= input$prediction_range[2]) %>% 
@@ -197,22 +197,11 @@ server <- function(input, output) {
       geom_point(aes(x = lasso_pred, y = unit_price_gold_sells), color = "#040552") +
       geom_abline(col = "red", lty = 2) +
       labs(x = "Prediction", y = "Gold value",
-           title = "Item price predictions", subtitle = "Using random forest and lasso regressions",
+           title = "Item price predictions", subtitle = "Using random forest (green) and lasso regressions (blue)",
            color = c("A", "B"))
   })
     
   output$plot_model <- renderPlot(plot_model())
-
-  # Outliers
-  output$outliers <- renderPlot(df %>% 
-    subset(profit < 2.5 & unit_price_gold_sells < 2.5) %>% 
-    ggplot() +  
-    geom_boxplot(aes(x = 'Sells', y = unit_price_gold_sells)) +
-    geom_text(aes(x = 'Sells', y = median(unit_price_gold_sells), label = median(unit_price_gold_sells)), size = 3, vjust = -1) +
-    geom_boxplot(aes(x = 'Profit', y = profit)) +
-    geom_text(aes(x = 'Profit', y = median(profit), label = median(profit)), size = 3, vjust = -0.5) +
-    labs(title = "Outliers on profit and sells", subtitle = "Limit at 2.5 gold profit and sell price", x = "", y = "Price in gold")
-  )  
 }
 
 shinyApp(ui = ui, server = server)

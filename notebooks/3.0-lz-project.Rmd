@@ -1007,8 +1007,18 @@ sells_lasso_aug %>%
 ```{r evaluate_model_2 }
 sells_lasso_aug %>%  
   ggplot() +
-  geom_point(aes(x = .pred * 100, y = unit_price_gold_sells * 100)) +
+  geom_point(aes(x = .pred, y = unit_price_gold_sells)) +
   geom_abline(col = "red", lty = 2) +
   labs(x = "Prediction", y = "Gold value",
        title = "Item price predictions", subtitle = "Using lasso regressions")
+```
+
+```{r evaluate_model_2_zoom }
+sells_lasso_aug %>%  
+  subset(.pred < 2) %>% 
+  ggplot() +
+  geom_point(aes(x = .pred, y = unit_price_gold_sells)) +
+  geom_abline(col = "red", lty = 2) +
+  labs(x = "Prediction", y = "Gold value",
+       title = "Item price predictions", subtitle = "prediction < 2 gold")
 ```

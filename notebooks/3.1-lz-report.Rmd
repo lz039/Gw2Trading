@@ -222,10 +222,8 @@ We need to zoom in much more to see the details.
 
 ```{r plot_outliers_zoom_sells }
 df_all %>% 
-  subset(profit < 2.5 & unit_price_gold_sells < 2.5) %>% 
+  subset(profit < 2.5 & profit > 0) %>% 
 ggplot() +  
-  geom_boxplot(aes(x = 'Sells', y = unit_price_gold_sells)) +
-  geom_text(aes(x = 'Sells', y = median(unit_price_gold_sells), label = median(unit_price_gold_sells)), size = 3, vjust = -1) +
   geom_boxplot(aes(x = 'Profit', y = profit)) +
   geom_text(aes(x = 'Profit', y = median(profit), label = median(profit)), size = 3, vjust = -0.5) +
   scale_y_continuous(labels = comma) +
@@ -238,7 +236,7 @@ median_profit_silver <- round(100 * df_all %>%
   first(), 2)
 
 median_profit_silver_filter <- round(100 * df_all %>% 
-  subset(profit < 2.5 & unit_price_gold_sells < 2.5) %>% 
+  subset(profit < 2.5 & profit > 0) %>% 
   drop_na(profit) %>% 
   summarise(median(profit)) %>% 
   first(), 2)
@@ -255,7 +253,7 @@ Let's take only the items with a realistic profit and strip away the items where
 
 ```{r filter_by_profit }
 df_all <- df_all %>% 
-  subset(profit > 0.04 & profit < 0.4)
+  subset(profit > 0.07 & profit < 0.4)
 
 df_all <- df_all %>% 
   subset(profit * 100 > vendor_value) %>% 
@@ -372,7 +370,7 @@ df_train_distribution <- df_train %>%
 df_train_distribution %>% 
   ggplot() +
   geom_bar(aes(x =  mean_profit, fill = type), stat="count") +
-  scale_x_binned(limits = c(0, 0.4)) +
+  scale_x_binned(limits = c(0.05, 0.4)) +
   labs(x = "Mean profit", y = "Count",
        title = "Item profit distribution", subtitle = "Items by profit, in gold", 
        caption = paste("Data from", params$data_date))
@@ -677,7 +675,7 @@ Nonetheless, the error values are already pretty low.
 ```{r visualize_model }
 
 sells_join_aug <- sells_lasso_aug %>% 
-  select(id = id, lasso_pred = .pred, unit_price_gold_sells) %>% 
+  select(id = id, lasso_pred = .pred, unit_price_gold_sells, type) %>% 
   left_join(sells_rf_aug %>% select(id = id, rf_pred = .pred), by = "id")
 
 sells_join_aug %>%  
@@ -685,7 +683,7 @@ sells_join_aug %>%
   geom_point(aes(x = rf_pred, y = unit_price_gold_sells), color = "#05541a") +
   geom_point(aes(x = lasso_pred, y = unit_price_gold_sells), color = "#040552") +
   geom_abline(col = "red", lty = 2) +
-  labs(x = "Prediction", y = "Gold value",
+  labs(x = "Predicted buy value", y = "Buy value",
        title = "Item price predictions", subtitle = "Using random forest (green) and lasso regressions (blue)",
        color = c("A", "B"),
        caption = paste("Data from", params$data_date))
@@ -747,14 +745,18 @@ sells_lasso_aug %>%
   metrics(truth = unit_price_gold_sells, estimate = .pred)
 ```
 
+The numbers look pretty equal but when zooming in to < 1 gold profit, we see some minor deviations.
+
 ```{r evaluate_model_2 }
 sells_lasso_aug %>%  
+  subset(.pred < 1) %>% 
   ggplot() +
-  geom_point(aes(x = .pred * 100, y = unit_price_gold_sells * 100)) +
+  geom_point(aes(x = .pred, y = unit_price_gold_sells, color = type)) +
   geom_abline(col = "red", lty = 2) +
-  labs(x = "Prediction", y = "Gold value",
-       title = "Item price predictions", subtitle = "using lasso regressions")
+  labs(x = "Predicted buy value", y = "Buy value",
+       title = "Item price predictions", subtitle = "prediction < 1 gold")
 ```
+Especially lower cost items like creafting material is underrated. 
 
 > Buy and sell prices are really closely correlated. Therefore it's easy for the model to predict them. 
 
@@ -762,6 +764,6 @@ sells_lasso_aug %>%
 
 # Outcome
 
-The dataset behaved very differently than I tought. There is a lot of data but the really relevant parts are only highest sell and lowest buy prices.
+The dataset behaved very differently than I thought. There is a lot of data but the really relevant parts are only highest sell and lowest buy prices.
 Auctions are changing so fast that static analysis isn't a good fit. After creating an auction it didn't take long until others were undercutting my prices.
 Therefore I was not able to reach my gold of earning `18 gold and 6 silver (worth 1$)`. There are still some running auctions but after all I even have `1 gold 43 silver and 56 copper` less. In addition, this method is really time consuming checking auctions now and then, and it doesn't really spark joy. It's clear that I'm not the first and only one who tries to earn money that way, which gets obvious when looking at existing fan pages like [GW2Efficiency](https://gw2efficiency.com/tradingpost) and [GW2TP](https://de.gw2tp.com/).

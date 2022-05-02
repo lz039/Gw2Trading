@@ -1,0 +1,418 @@
+---
+title: "Geld verdienen mit Auktionen - am Beispiel eines Online Games"
+author: "Lukas Zaiser"
+date: '2022-05-02'
+params: 
+ institute: "HdM Stuttgart"
+ country: "Germany"
+ year: "2022"
+ data_date: "2022-04-01"
+output:
+  powerpoint_presentation:
+    reference_doc: mypptstyle.pptx
+---
+
+```{r load_packages, message=FALSE, warning=FALSE, include=FALSE}
+# API
+library(httr)
+library(jsonlite)
+
+# Basics
+library(tidyverse)
+library(readr)
+library(visdat)
+
+# Plotting
+library(ggplot2)
+library(gt)
+library(gtable)
+library(DT)
+
+# Working with models
+library(rsample)
+library(tidymodels)
+library(GGally)
+library(corrr)
+library(parsnip)
+library(yardstick)
+
+# own functions
+source("../libs/prepare_data.R")
+
+tidymodels_prefer()
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Motivation
+
+"Money isn't everything as long as you have enough of it" - Malcolm Forbes
+
+![Währung](images/coin.png)
+
+## Angebot und Nachfrage
+
+:::::: {.columns}
+::: {.column}
+Für uns sind nur zwei Einträge relevant
+
+![Höchster Kaufpreis](images/buys.png)
+:::
+
+::: {.column}
+![Niedrigster Verkaufspreis](images/sells.png)
+:::
+::::::
+
+## Profit
+
+Das Auktionshaus erhebt Steuern.
+
+- 5% für das Einstellen eines Angebots
+- 10% beim Verkauf
+
+Ein Beispiel:
+
+- Kauf für 1,22 Silber
+- Verkauf für 26,14 Silber
+  -  5% davon werden direkt abgezogen
+  -  10% davon werden bei Kauf abgezogen
+- Wir bekommen 26,14 * 0,85 = 22,22 Silber
+
+Abzüglich Kaufpreis ergibt das ein Gewinn von 21 Silber.
+
+## Data Acquisition
+
+```{r data_scraping, include=FALSE}
+  listings_response <- GET("https://api.guildwars2.com/v2/commerce/listings")
+  all_items <-  content(listings_response, "text") %>% fromJSON()
+  #cat(paste("Found ", length(all_items), "items in total.\n"))
+  
+  item_list <- NULL
+  price_list_buys <- NULL
+  price_list_sells <- NULL
+  
+  take <- 400 # 26800
+  batch_size <- 200 # higher batch sizes are much better. 200 is the maximum.
+
+  # get price lists
+  for (i in 0:(take/batch_size - 1))
+  {
+    rowBatch <- (batch_size*i + 1):(batch_size * (i + 1))
+    currentBatch <- all_items[rowBatch] %>% paste(collapse = ",")
+   
+    # get price details
+    price_response <- GET(paste("https://api.guildwars2.com/v2/commerce/listings?ids=",
+                                currentBatch,
+                                sep = ""))
+    
+    # validate response code
+    if (price_response$status_code != "200" || str_starts(content(price_response, "text"), "<html>"))
+    {
+      cat(paste("Error getting prices in batch ", i, ":", price_response$status_code, 
+                " :: ", price_response, ".\n"))
+      
+      next
+    }
+    
+    price_response_n <- content(price_response, "text") %>% fromJSON()
+    
+    # process price_list_buys
+    for (row in 0:nrow(price_response_n))
+    {
+      id <- price_response_n[row, "id"]
+      buy <- price_response_n[row, "buys"]
+    
+      if (length(buy) > 0)
+      {
+        value <- buy[[1]] %>% 
+          as_tibble(.name_repair = "minimal") %>%  # minimal == No name repair or checks, beyond basic existence
+          mutate(id = id)
+        
+        price_list_buys <- price_list_buys %>% bind_rows(value) # combine data frames
+      }
+    }
+    
+    # process price_list_sells
+    for (row in 0:nrow(price_response_n))
+    {
+      id <- price_response_n[row, "id"]
+      sell <- price_response_n[row, "sells"]
+    
+      if (length(sell) > 0)
+      {
+        value <- sell[[1]] %>% 
+          as_tibble(.name_repair = "minimal") %>% 
+          mutate(id = id)
+        
+        price_list_sells <- price_list_sells %>% bind_rows(value)
+      }
+    }
+    
+    # cat(paste("Getting prices, batch ", i + 1, "/", take/batch_size, ".\n"))
+  }
+  
+  # get item details
+  for (i in 0:(take/batch_size - 1))
+  {
+    rowBatch <- (batch_size*i + 1):(batch_size * (i + 1))
+    currentBatch <- all_items[rowBatch] %>% 
+      paste(collapse = ",")
+   
+    # get items details
+    item_response <- GET(paste("https://api.guildwars2.com/v2/items?ids=",
+                               currentBatch,
+                               sep = ""))
+    
+    item_response_n <- content(item_response, "text") %>%
+      fromJSON() %>% 
+      select(any_of(c("name", "description", "type", "rarity",
+                      "vendor_value", "id", "icon", "level", "flags", "details"))) %>% 
+      mutate(
+        id = as.integer(id),
+        vendor_value = as.double(vendor_value)
+      )
+    
+    if (is.null(item_list)) {
+      item_list <- item_response_n
+    } else {
+      item_list <- item_list %>% 
+        add_row(item_response_n)
+    }
+    
+    # cat(paste("Getting items, batch ", i + 1, "/", take/batch_size, ".\n"))
+  }
+  
+  item_list <- item_list %>% 
+    mutate(
+      item_type = item_list[["details"]][["type"]],
+      item_weight_class = item_list[["details"]][["weight_class"]],
+           ) %>% 
+    select(-details, -flags, -description)
+
+  dir <- getwd()
+  date <- Sys.Date()
+
+  #write_csv(price_list_buys, file = paste(dir, "/../data/raw/gw2-all-buys-raw-", date, ".csv", sep = ""))
+  #write_csv(price_list_sells, file = paste(dir, "/../data/raw/gw2-all-sells-raw-", date, ".csv", sep = ""))
+  #write_csv(item_list, file = paste(dir, "/../data/raw/gw2-all-items-raw-", date, ".csv", sep = ""))
+```
+Get data:
+
+- Load all items from API, found: `r length(all_items)`
+- For this presentation, take a sample of `r take` to reduce loading times.
+- Get buy and sell auctions for each item
+  - Buy auctions: `r nrow(price_list_buys)`
+  - Sell auctions: `r nrow(price_list_sells)`
+- Get details like name, icon for each item
+  - Found `r nrow(price_list_sells)`
+- Write data to CSV files
+
+## Read data from API as JSON
+
+```{#mycode .R .numberLines}
+# Call API - get price details
+price_response <- GET(paste("https://api.guildwars2.com/v2/commerce/listings?ids=", currentBatch, sep = ""))
+
+# Parse JSON
+price_response_n <- content(price_response, "text") %>% fromJSON()
+
+# Read content (mockup)
+id <- price_response_n[row, "id"]
+buy <- price_response_n[row, "buys"]
+```
+
+## Prepare data
+
+```{r load_csv, message=FALSE, warning=FALSE}
+dir <- getwd()
+date <- params$data_date
+
+price_list_buys <- read.csv(paste(dir, "/../data/raw/gw2-all-buys-raw-", date, ".csv", sep = ""))
+price_list_sells <- read.csv(paste(dir, "/../data/raw/gw2-all-sells-raw-", date, ".csv", sep = ""))
+item_list <- read.csv(paste(dir, "/../data/raw/gw2-all-items-raw-", date, ".csv", sep = ""))
+
+df_buys <- item_list %>% left_join(price_list_buys, by = "id")
+df_sells <- item_list %>% left_join(price_list_sells, by = "id")
+
+rm(dir)
+rm(date)
+rm(item_list)
+rm(price_list_sells)
+rm(price_list_buys)
+```
+
+Die Daten liegen bis jetzt verteilt in drei Dateien. Diese müssen zuerst zusammengeführt werden. Danach sehen die Daten so aus:
+
+```{r}
+glimpse(df_buys)
+```
+## Data cleaning
+
+```{r data_cleaning }
+df_sells <- df_sells %>% 
+  drop_na(unit_price, quantity) %>% 
+  mutate(rarity = as.factor(rarity),
+         type = as.factor(type),
+         item_type = as.factor(item_type),
+         item_weight_class = as.factor(item_weight_class),
+         unit_price_gold = unit_price / 10000) %>% 
+  select(-unit_price)
+
+df_buys <- df_buys %>% 
+  drop_na(unit_price, quantity) %>% 
+  mutate(rarity = as.factor(rarity),
+         type = as.factor(type),
+         item_type = as.factor(item_type),
+         item_weight_class = as.factor(item_weight_class),
+         unit_price_gold = unit_price / 10000) %>% 
+  select(-unit_price)
+```
+
+Da die Daten von einer API kommen, sind sie größtenteils schon aufbereitet. Allerdings lassen sich einige Variablen noch besser verarbeiten:
+
+```{#mycode .R .numberLines}
+df_sells <- df_sells %>% 
+  drop_na(unit_price, quantity) %>% 
+  mutate(rarity = as.factor(rarity),
+         type = as.factor(type),
+         item_type = as.factor(item_type),
+         item_weight_class = as.factor(item_weight_class),
+         unit_price_gold = unit_price / 10000) %>% 
+  select(-unit_price)
+```
+
+## Filter
+
+Wie bereits erwähnt, interessieren uns nur die attraktivsten Angebote (analog Käufe/Verkäufe)
+
+```{r}
+df_max_buys <- df_buys %>% 
+  group_by(name) %>% 
+  slice(which.max(unit_price_gold))
+
+df_min_sells <- df_sells %>% 
+  group_by(name) %>% 
+  slice(which.min(unit_price_gold))
+```
+
+```{#mycode .R .numberLines}
+df_max_buys <-  df_buys %>% 
+  group_by(name) %>% 
+  slice(which.max(unit_price_gold))
+```
+
+Damit wird das Datenset stark verringert:
+
+- Kaufauktionen von `r nrow(df_buys)` auf `r nrow(df_max_buys)`
+- Verkaufsauktionen von `r nrow(df_sells)` auf `r nrow(df_min_sells)`
+
+## Berechnung des Profits
+
+```{r merge_buys_sells, message=FALSE, warning=FALSE}
+df_all <- df_max_buys %>%
+  mutate(quantity_buys = quantity,
+         unit_price_gold_buys = unit_price_gold) %>% 
+  select(-quantity, -unit_price_gold) %>% 
+  right_join(df_min_sells %>% 
+              mutate(quantity_sells = quantity,
+                     unit_price_gold_sells = unit_price_gold) %>% 
+              select(id, quantity_sells, unit_price_gold_sells), by = "id") %>% 
+  mutate(name = name.x) %>% 
+  select(-name.x, -name.y)
+
+```
+
+```{r create_profit_feature }
+df_all <- df_all %>% 
+  mutate(unit_price_gold_diff = unit_price_gold_sells - unit_price_gold_buys,
+         profit = 0.85 * unit_price_gold_sells - unit_price_gold_buys,
+         more_sells = quantity_sells - quantity_buys)
+```
+
+Jetzt ist das Datenset handlebar. Erst wird `df_max_buys` und `df_min_sells` anhand der ID gejoined und dann kann der Profit pro Gegenstand berechnet werden.
+
+```{#mycode .R .numberLines}
+df_all <- df_all %>% 
+  mutate(unit_price_gold_diff = unit_price_gold_sells - unit_price_gold_buys,
+         profit = 0.85 * unit_price_gold_sells - unit_price_gold_buys,
+         more_sells = quantity_sells - quantity_buys)
+```
+
+## Daten Überblick
+
+Es gibt vor allem bei den Verkäufen einige Ausreißer nach oben mit 3000 oder auch dem Maximum 10.000 Gold.
+Diese und viele sehr hohe Angebote können aber nicht ernst genommen werden. 
+
+```{r plot_outliers, message=FALSE, warning=FALSE}
+df_all %>% 
+  subset(profit < 2.5 & profit > 0) %>% 
+ggplot() +
+  geom_boxplot(aes(x = 'Profit', y = profit)) +
+  geom_text(aes(x = 'Profit', y = median(profit), label = median(profit)), size = 3, vjust = -0.5) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Outliers on profit", subtitle = "Limit at 2.5 gold profit",
+    x = "", y = "Price in gold", caption = paste("Data from", params$data_date))
+
+median_profit_silver_filter <- round(100 * df_all %>% 
+  subset(profit < 2.5 & profit > 0) %>% 
+  drop_na(profit) %>% 
+  summarise(median(profit)) %>% 
+  first(), 2)
+```
+
+```{r filter_by_profit }
+df_all <- df_all %>% 
+  subset(profit > 0.07 & profit < 0.4)
+
+df_all <- df_all %>% 
+  subset(profit * 100 > vendor_value) %>% 
+  arrange(desc(profit))
+```
+
+Daher wurde so gefiltert, dass der Profit 2,5 Gold nicht überschreitet. Dadurch ergibt sich ein Median beim Gewinn von `r median_profit_silver_filter` Silber. Dadurch sind nur noch `r nrow(df_all)` Gegenstände übrig geblieben.
+
+## Gegenstände
+
+```{r df_all_overview, message=FALSE, warning=FALSE}
+
+df_all %>%
+  group_by(type, rarity) %>% 
+  summarise(name = unique(name),
+            profit = profit * 100,
+            icon = min(web_image(icon, height = 50))
+            ) %>% 
+  drop_na() %>% 
+  arrange(desc(profit)) %>%
+  gt(rowname_col = "name") %>%
+  tab_header(title = "Realistic top profit items", subtitle = "by type and rarity") %>%
+  fmt_number(
+    columns = profit,
+    suffixing = "S"
+  ) %>% 
+  fmt_markdown(
+    columns = icon
+  ) %>% 
+  summary_rows(
+    groups = TRUE,
+    columns = profit,
+    fns = list(average = "mean"),
+    formatter = fmt_number
+  ) %>%
+  tab_footnote(
+    footnote = "Prices in silver",
+    locations = cells_column_labels(columns = profit)
+  ) %>%
+  tab_source_note(
+    "Based on data from api.guildwars2.com"
+  ) %>% 
+  tab_options(
+    summary_row.background.color = "#ACEACE",
+    row_group.background.color = "#FFEFDB",
+    table.layout = "auto",
+    container.overflow.x = TRUE,
+    container.height = px(450)
+  )
+```
