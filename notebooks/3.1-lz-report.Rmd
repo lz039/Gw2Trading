@@ -437,9 +437,9 @@ Because we scaled the numbers we can't really say something about the real value
 Four clusters were created out of the data:
 
 - The "(1) red" cluster are low-cost items with low profit (don't buys)
-- The "(2) green" cluster are high-cost items with a high variance in profit (maybe more outliers)
-- The "(3) teal" cluster are mid-cost items with different profit
-- The "(4) purple" cluster are low-cost items with high profit (should buys)
+- The "(2) green" cluster are mid-cost items with different profit
+- The "(3) teal" cluster are low-cost items with mostly high profit (should buys)
+- The "(4) purple" cluster are high-cost items with high profit (could buys)
 
 > The profit is not a question of buy costs, there are items with high profit for low and for high costs. 
 

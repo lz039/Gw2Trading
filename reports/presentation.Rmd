@@ -83,7 +83,7 @@ Ein Beispiel:
 
 Abzüglich Kaufpreis ergibt das ein Gewinn von 21 Silber.
 
-## Data Acquisition
+## Datenbeschaffung
 
 ```{r data_scraping, include=FALSE}
   listings_response <- GET("https://api.guildwars2.com/v2/commerce/listings")
@@ -199,18 +199,18 @@ Abzüglich Kaufpreis ergibt das ein Gewinn von 21 Silber.
   #write_csv(price_list_sells, file = paste(dir, "/../data/raw/gw2-all-sells-raw-", date, ".csv", sep = ""))
   #write_csv(item_list, file = paste(dir, "/../data/raw/gw2-all-items-raw-", date, ".csv", sep = ""))
 ```
-Get data:
+Daten abrufen:
 
-- Load all items from API, found: `r length(all_items)`
-- For this presentation, take a sample of `r take` to reduce loading times.
-- Get buy and sell auctions for each item
-  - Buy auctions: `r nrow(price_list_buys)`
-  - Sell auctions: `r nrow(price_list_sells)`
-- Get details like name, icon for each item
-  - Found `r nrow(price_list_sells)`
-- Write data to CSV files
+- Alle im Spiel befindlichen Gegenstände von der API abrufen: `r length(all_items)`
+- Für diese Präsentation nehmen wir `r take` stück um die Ladezeit zu verringern
+- Kauf- und Verkaufsauktionen für jeden Gegenstand abrufen
+  - Kaufauktionen: `r nrow(price_list_buys)`
+  - Verkaufsauktionen: `r nrow(price_list_sells)`
+- Details pro Gegenstand wie Name, Icon etc.
+  - `r nrow(price_list_sells)` gefunden
+- Alle Daten in CSVs schreiben
 
-## Read data from API as JSON
+## Daten als JSON von der API lesen
 
 ```{#mycode .R .numberLines}
 # Call API - get price details
@@ -224,7 +224,7 @@ id <- price_response_n[row, "id"]
 buy <- price_response_n[row, "buys"]
 ```
 
-## Prepare data
+## Data preparation
 
 ```{r load_csv, message=FALSE, warning=FALSE}
 dir <- getwd()
@@ -249,7 +249,7 @@ Die Daten liegen bis jetzt verteilt in drei Dateien. Diese müssen zuerst zusamm
 ```{r}
 glimpse(df_buys)
 ```
-## Data cleaning
+## Data cleaning I
 
 ```{r data_cleaning }
 df_sells <- df_sells %>% 
@@ -284,7 +284,7 @@ df_sells <- df_sells %>%
   select(-unit_price)
 ```
 
-## Filter
+## Data cleaning II
 
 Wie bereits erwähnt, interessieren uns nur die attraktivsten Angebote (analog Käufe/Verkäufe)
 
@@ -372,47 +372,365 @@ df_all <- df_all %>%
   arrange(desc(profit))
 ```
 
-Daher wurde so gefiltert, dass der Profit 2,5 Gold nicht überschreitet. Dadurch ergibt sich ein Median beim Gewinn von `r median_profit_silver_filter` Silber. Dadurch sind nur noch `r nrow(df_all)` Gegenstände übrig geblieben.
+Daher wurde so gefiltert, dass der Profit 2,5 Gold nicht überschreitet. Dadurch ergibt sich ein Median beim Gewinn von `r median_profit_silver_filter` Silber. Es sind nun nur noch `r nrow(df_all)` Gegenstände übrig geblieben.
 
-## Gegenstände
+## Data Split
 
-```{r df_all_overview, message=FALSE, warning=FALSE}
+Alle bisherigen Operationen wurden auch in eine Funktion ausgelagert, sodass immer von diesem Datenset aus gearbeitet werden kann, auch wenn man neuere Daten über die API abruft. Die Daten werden nun in ein Training und ein Testset eingeteilt.
 
-df_all %>%
-  group_by(type, rarity) %>% 
-  summarise(name = unique(name),
-            profit = profit * 100,
-            icon = min(web_image(icon, height = 50))
-            ) %>% 
-  drop_na() %>% 
-  arrange(desc(profit)) %>%
-  gt(rowname_col = "name") %>%
-  tab_header(title = "Realistic top profit items", subtitle = "by type and rarity") %>%
-  fmt_number(
-    columns = profit,
-    suffixing = "S"
-  ) %>% 
-  fmt_markdown(
-    columns = icon
-  ) %>% 
-  summary_rows(
-    groups = TRUE,
-    columns = profit,
-    fns = list(average = "mean"),
-    formatter = fmt_number
-  ) %>%
-  tab_footnote(
-    footnote = "Prices in silver",
-    locations = cells_column_labels(columns = profit)
-  ) %>%
-  tab_source_note(
-    "Based on data from api.guildwars2.com"
-  ) %>% 
-  tab_options(
-    summary_row.background.color = "#ACEACE",
-    row_group.background.color = "#FFEFDB",
-    table.layout = "auto",
-    container.overflow.x = TRUE,
-    container.height = px(450)
-  )
+```{#mycode .R .numberLines}
+data_split <- initial_split(df_all, 
+                           prop = 3/4, 
+                           strata = profit, 
+                           breaks = 4)
+                           
+train_data <- training(data_split) 
+test_data <- testing(data_split)
 ```
+
+```{r create_data_split}
+set.seed(42)
+
+# Put 3/4 of the data into the training set 
+data_split <- initial_split(df_all, 
+                           prop = 3/4, 
+                           strata = profit, 
+                           breaks = 4)
+
+# Create dataframes for the two sets:
+train_data <- training(data_split) 
+test_data <- testing(data_split)
+
+df_train <- train_data
+```
+
+## Abhänigkeiten
+
+Um zu sehen welche Input-Variablen relevant sind, kann das Spearman Schaubild weiterhelfen.
+
+```{r spearman_analysis}
+df_train %>% 
+  select(where(is.numeric), -more_sells, -profit, -unit_price_gold_diff) %>% # only select numerical data
+  vis_cor(cor_method = "spearman", na_action = "pairwise.complete.obs")
+```
+
+## Preisverteilung
+
+```{r profit_distribution}
+df_train_distribution <- df_train %>% 
+  group_by(name) %>% 
+  summarise(mean_profit = mean(profit),
+            type = unique(type),
+            rarity = unique(rarity)) %>% 
+  arrange(desc(mean_profit))
+  
+df_train_distribution %>% 
+  ggplot() +
+  geom_bar(aes(x =  mean_profit, fill = type), stat="count") +
+  scale_x_binned(limits = c(0.05, 0.4)) +
+  labs(x = "Mean profit", y = "Count",
+       title = "Item profit distribution", subtitle = "Items by profit, in gold", 
+       caption = paste("Data from", params$data_date))
+```
+
+### Clusteranalyse I
+
+Um einen besseren Überblick über die Daten zu bekommen, habe ich die Daten geclustert. In dem Dendrogram kann man sinnvolle Clustergrößen ablesen.
+
+```{r scale_profit_costs}
+df_cl <- df_train %>% 
+  select(c("id", "profit", "unit_price_gold_buys"))
+
+df_cl$profit <- scale(df_cl$profit, center = TRUE, scale = TRUE)
+df_cl$unit_price_gold_buys <- scale(df_cl$unit_price_gold_buys, center = TRUE, scale = TRUE)
+```
+
+```{r calculate_cluster}
+d <- 
+  df_cl %>% 
+  select(-id) %>% 
+  dist(method = "euclidean")
+
+hc <- hclust(d, method = "ward.D2") 
+plot(hc) 
+```
+
+## Clusteranalyse II
+
+Es wurden vier Cluster gebildet:
+- Das "(1) rote" Cluster sind günstige Gegenstände mit Verlust (nicht kaufen)
+- Das "(2) grüne" Cluster sind mittelpreisige Gegenstände mit unterschiedlichem Gewinn (nicht kaufen)
+- Das "(3) hellblaue" Cluster sind günstige Gegenstände mit überwiegend hohem Gewinn (sollte man kaufen)
+- Das "(4) lila" cluster sind hochpreisige Gegenstände mit hohem Gewinn (könnte man kaufen)
+
+Es gibt also einige Gegenstände die für uns interessant sind.
+
+```{r plot_items_clustered_4}
+
+hc$labels <- df_cl$id
+
+grp <- cutree(hc, k = 4) 
+df_cl$cluster <- grp
+
+df_cl %>% 
+  ggplot(aes(unit_price_gold_buys, 
+             profit, 
+             color = factor(cluster))) +
+  geom_point() +
+  # geom_text(aes(label = id), size = 3, check_overlap = FALSE, vjust = 0, nudge_y = 0.1) +
+  xlab("Buy Costs transformed") +
+  ylab("Profit transformed") +
+  theme(legend.title=element_blank())
+
+rm(d)
+rm(hc)
+rm(grp)
+```
+
+## Beste Gegenstände nach ROI
+
+![Preise in Silber](images/top_items.png)
+
+## Zwischenüberlegung
+
+Wir haben nun Gegenstände gefunden die einen hohen Gewinn erzielen würden. Jetzt kann man bereits anfangen diese zu Kaufen/Verkaufen und so Gewinn erziehlen.
+
+Jedoch sollte auch ein Modell trainiert werden. Daher die Überlegung ein Modell zu trainieren, das den Verkaufspreis pro Gegenstand vorhersagt. Wenn es dabei Abweichungen zum tatsächlichen Kaufpreis gibt, könnte dies für ein Gegenstand stehen, der unter/überbewertet ist und sich in Zukunft zum vorhergesagten Wert entwickelt.
+
+## Features auswählen
+
+Folgende features wurden zu Beginn ausgewählt:
+
+```{r create_train_model }
+df_train <- train_data %>% 
+  select(id, name, unit_price_gold_sells, unit_price_gold_buys, type, rarity, level) %>% 
+  drop_na()
+```
+
+```{r create_recipe }
+sells_rec <- 
+  recipe(unit_price_gold_sells ~ ., data = df_train) %>% 
+  update_role(id, name, new_role = "ID") %>% 
+  step_dummy(all_nominal_predictors())%>% 
+  step_zv(all_predictors()) %>%  # remove zero vectors
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors())
+
+summary(sells_rec)
+```
+
+## Modell aufbauen
+
+Ich habe zwei verschiedene Regressionsalgorithmen ausprobiert. Den Regression des `Random Forest` und die Lasso-Regressions von `glm` bzw. `glmnet`. Das Rezept dazu sieht folgendermaßen aus:
+
+```{#mycode .R .numberLines}
+sells_rec <- 
+    recipe(unit_price_gold_sells ~ ., data = df_train) %>% 
+    update_role(id, name, new_role = "ID") %>% 
+    step_dummy(all_nominal_predictors())%>% 
+    step_zv(all_predictors()) %>%  # remove zero vectors
+    step_center(all_predictors()) %>%
+    step_scale(all_predictors())
+  
+  lasso_mod <- 
+    linear_reg(penalty = 0.1, mixture = 1) %>% 
+    set_engine("glmnet")
+  
+  sells_fit <- 
+    workflow() %>% 
+    add_recipe(sells_rec) %>%
+    add_model(lasso_mod) %>% 
+    fit(data = df_train)
+```
+
+```{r ml_workflow, message=FALSE, warning=FALSE, include=FALSE}
+# parsnip model
+set.seed(42)
+
+rf_mod <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>% 
+  set_mode("regression")
+
+lasso_mod <- 
+  linear_reg(penalty = 0.1, mixture = 1) %>% 
+  set_engine("glmnet")
+
+sells_wflow <- 
+  workflow() %>% 
+  add_recipe(sells_rec) 
+
+rf_wflow <- 
+  sells_wflow %>% 
+  add_model(rf_mod)
+
+
+lasso_wflow <- 
+  sells_wflow %>% 
+  add_model(lasso_mod)
+
+rf_wflow
+lasso_wflow
+```
+
+```{r fit_rf_model, message=FALSE, warning=FALSE, include=FALSE}
+sells_fit <- 
+  rf_wflow %>% 
+  fit(data = df_train)
+
+sells_rf_aug <- 
+  augment(sells_fit, test_data)
+
+sells_rf_aug %>% 
+  select(name, unit_price_gold_sells, .pred)
+
+sells_rf_aug %>% 
+  metrics(truth = unit_price_gold_sells, estimate = .pred)
+```
+
+```{r fit_lasso_model, message=FALSE, warning=FALSE, include=FALSE}
+sells_fit <- 
+  lasso_wflow %>% 
+  fit(data = df_train)
+
+sells_lasso_aug <- 
+  augment(sells_fit, test_data)
+
+sells_lasso_aug %>% 
+  select(name, unit_price_gold_sells, .pred)
+
+sells_lasso_aug %>% 
+  metrics(truth = unit_price_gold_sells, estimate = .pred)
+```
+
+## Ergebnis
+
+```{r visualize_model }
+
+sells_join_aug <- sells_lasso_aug %>% 
+  select(id = id, lasso_pred = .pred, unit_price_gold_sells, type) %>% 
+  left_join(sells_rf_aug %>% select(id = id, rf_pred = .pred), by = "id")
+
+sells_join_aug %>%  
+  ggplot() +
+  geom_point(aes(x = rf_pred, y = unit_price_gold_sells), color = "#05541a") +
+  geom_point(aes(x = lasso_pred, y = unit_price_gold_sells), color = "#040552") +
+  geom_abline(col = "red", lty = 2) +
+  labs(x = "Predicted buy value", y = "Buy value",
+       title = "Item price predictions", subtitle = "Using random forest (green) and lasso regressions (blue)",
+       color = c("A", "B"),
+       caption = paste("Data from", params$data_date))
+```
+
+## Einfluss der features auf das Ergebnis
+
+```{r feature_influence, message=FALSE, warning=FALSE}
+sells_fit %>%
+  extract_fit_parsnip() %>%
+  tidy()
+```
+
+## Tuning
+
+Dadurch, dass nur eine Variable Einfluss auf das Modell hat, ist beim Hyperparametertuning kein hilfreiches Ergebnis zustande gekommen:
+
+```{r tuning_bootstrap, include=FALSE}
+set.seed(1234)
+
+sells_boot <- bootstraps(df_train)
+
+tune_spec <- linear_reg(penalty = tune(), mixture = 1) %>%
+  set_engine("glmnet")
+
+lambda_grid <- grid_regular(penalty(), levels = 50)
+```
+
+```{r tuning_grid, include=FALSE}
+doParallel::registerDoParallel()
+
+set.seed(2020)
+
+lasso_grid <- 
+  tune_grid(
+  sells_wflow %>% 
+    add_model(tune_spec),
+    resamples = sells_boot,
+    grid = lambda_grid
+)
+
+lasso_grid %>%
+  collect_metrics()
+```
+
+```{r tuning_metrics }
+lasso_grid %>%
+  collect_metrics() %>%
+  ggplot(aes(penalty, mean, color = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err,
+                    ymax = mean + std_err),
+                alpha = 0.5) +
+  geom_line(size = 1.5) +
+  facet_wrap(~.metric, scales = "free", nrow = 2) +
+  scale_x_log10() +
+  theme(legend.position = "none")
+```
+
+## Ausführen auf neuen Daten
+
+```{r load_csv_2, message=FALSE, warning=FALSE, include=FALSE}
+dir <- getwd()
+date <- "2022-04-06"
+
+price_list_buys <- read.csv(paste(dir, "/../data/raw/gw2-all-buys-raw-", date, ".csv", sep = ""))
+price_list_sells <- read.csv(paste(dir, "/../data/raw/gw2-all-sells-raw-", date, ".csv", sep = ""))
+item_list <- read.csv(paste(dir, "/../data/raw/gw2-all-items-raw-", date, ".csv", sep = ""))
+
+df_buys <- item_list %>% left_join(price_list_buys, by = "id")
+df_sells <- item_list %>% left_join(price_list_sells, by = "id")
+
+rm(dir)
+rm(item_list)
+rm(price_list_sells)
+rm(price_list_buys)
+```
+
+```{r prepare_data_2, message=FALSE, warning=FALSE, include=FALSE}
+df_all <- prepare_data(df_sells, df_buys)
+```
+
+```{r run_model_2, include=FALSE}
+sells_lasso_aug <- 
+  augment(sells_fit, df_all)
+
+sells_lasso_aug %>% 
+  select(name, unit_price_gold_sells, .pred)
+
+sells_lasso_aug %>% 
+  metrics(truth = unit_price_gold_sells, estimate = .pred)
+```
+
+Das Schaubild sieht sehr ähnlich zu dem vorherigen Ergebnis aus, daher wird auf Gewinn < 1 Gold gezoomt.
+
+```{r evaluate_model_2 }
+sells_lasso_aug %>%  
+  subset(.pred < 1) %>% 
+  ggplot() +
+  geom_point(aes(x = .pred, y = unit_price_gold_sells, color = type)) +
+  geom_abline(col = "red", lty = 2) +
+  labs(x = "Predicted buy value", y = "Buy value",
+       title = "Item price predictions", subtitle = "prediction < 1 gold")
+```
+
+## Ergebnis
+
+Das Ziel war, `1$` in In-Game Währung zu verdienen, das entspricht `18 Gold und 6 Silber`.
+Obwohl noch ein paar Auktionen laufen, konnte das Ziel nicht erreicht werden.
+
+Tatsächlich habe ich aber Gewinn gemacht: `57 Silber und 70 Kupfer`. 
+Finanziell hat sich das natürlich nicht gelohnt, aber es war eine interessante Erfahrung.
+
+## Fazit
+
+The dataset behaved very differently than I thought. There is a lot of data but the really relevant parts are only highest sell and lowest buy prices.
+Auctions are changing so fast that static analysis isn't a good fit. After creating an auction it didn't take long until others were undercutting my prices.
+Therefore I was not able to reach my gold of earning `18 gold and 6 silver (worth 1$)`. There are still some running auctions but after all I even have `1 gold 43 silver and 56 copper` less. In addition, this method is really time consuming checking auctions now and then, and it doesn't really spark joy. It's clear that I'm not the first and only one who tries to earn money that way, which gets obvious when looking at existing fan pages like [GW2Efficiency](https://gw2efficiency.com/tradingpost) and [GW2TP](https://de.gw2tp.com/).
