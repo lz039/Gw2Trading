@@ -48,40 +48,17 @@ knitr::opts_chunk$set(echo = FALSE)
 
 ## Motivation
 
-"Money isn't everything as long as you have enough of it" - Malcolm Forbes
+"Money isn't everything as long as you have enough of it" - Malcolm Forbes:
+
+- Microtransaktionen und bezahlte Services sind normal geworden
+- Man hat die Wahl viel Zeit oder viel Geld zu investieren
+- Ein Weg Geld zu verdienen ist das Auktionshaus
+- Man muss wissen, was zu welchem Preis gekauft und verkauft werden soll
+
+- Die Daten kommen von dem Online-Spiel Guild Wars 2, das 2012 von NCSoft veröffentlicht wurde
+- Es gibt über 20.000 Gegenstände die gesammelt und im Auktionshaus gehandelt werden können
 
 ![Währung](images/coin.png)
-
-## Angebot und Nachfrage
-
-:::::: {.columns}
-::: {.column}
-Für uns sind nur zwei Einträge relevant
-
-![Höchster Kaufpreis](images/buys.png)
-:::
-
-::: {.column}
-![Niedrigster Verkaufspreis](images/sells.png)
-:::
-::::::
-
-## Profit
-
-Das Auktionshaus erhebt Steuern.
-
-- 5% für das Einstellen eines Angebots
-- 10% beim Verkauf
-
-Ein Beispiel:
-
-- Kauf für 1,22 Silber
-- Verkauf für 26,14 Silber
-  -  5% davon werden direkt abgezogen
-  -  10% davon werden bei Kauf abgezogen
-- Wir bekommen 26,14 * 0,85 = 22,22 Silber
-
-Abzüglich Kaufpreis ergibt das ein Gewinn von 21 Silber.
 
 ## Datenbeschaffung
 
@@ -202,7 +179,7 @@ Abzüglich Kaufpreis ergibt das ein Gewinn von 21 Silber.
 Daten abrufen:
 
 - Alle im Spiel befindlichen Gegenstände von der API abrufen: `r length(all_items)`
-- Für diese Präsentation nehmen wir `r take` stück um die Ladezeit zu verringern
+- Hier nehmen wir `r take` Stück um die Ladezeit zu verringern. Alle weiteren Auswertungen nutzen alle Daten.
 - Kauf- und Verkaufsauktionen für jeden Gegenstand abrufen
   - Kaufauktionen: `r nrow(price_list_buys)`
   - Verkaufsauktionen: `r nrow(price_list_sells)`
@@ -284,9 +261,22 @@ df_sells <- df_sells %>%
   select(-unit_price)
 ```
 
-## Data cleaning II
 
-Wie bereits erwähnt, interessieren uns nur die attraktivsten Angebote (analog Käufe/Verkäufe)
+## Angebot und Nachfrage
+
+:::::: {.columns}
+::: {.column}
+Für uns sind nur zwei Einträge relevant
+
+![Höchster Kaufpreis](images/buys.png)
+:::
+
+::: {.column}
+![Niedrigster Verkaufspreis](images/sells.png)
+:::
+::::::
+
+## Data cleaning II
 
 ```{r}
 df_max_buys <- df_buys %>% 
@@ -308,6 +298,23 @@ Damit wird das Datenset stark verringert:
 
 - Kaufauktionen von `r nrow(df_buys)` auf `r nrow(df_max_buys)`
 - Verkaufsauktionen von `r nrow(df_sells)` auf `r nrow(df_min_sells)`
+
+## Profit
+
+Das Auktionshaus erhebt Steuern:
+
+- 5% für das Einstellen eines Angebots
+- 10% beim Verkauf
+
+Ein Beispiel:
+
+- Kauf für 1,22 Silber
+- Verkauf für 26,14 Silber
+  -  5% davon werden direkt abgezogen
+  -  10% davon werden bei Kauf abgezogen
+- Wir bekommen 26,14 * 0,85 = 22,22 Silber
+
+Abzüglich Kaufpreis ergibt das ein Gewinn von 21 Silber.
 
 ## Berechnung des Profits
 
@@ -332,7 +339,7 @@ df_all <- df_all %>%
          more_sells = quantity_sells - quantity_buys)
 ```
 
-Jetzt ist das Datenset handlebar. Erst wird `df_max_buys` und `df_min_sells` anhand der ID gejoined und dann kann der Profit pro Gegenstand berechnet werden.
+Erst wird `df_max_buys` und `df_min_sells` anhand der ID gejoined und dann kann der Profit pro Gegenstand berechnet werden.
 
 ```{#mycode .R .numberLines}
 df_all <- df_all %>% 
@@ -408,6 +415,8 @@ df_train <- train_data
 
 Um zu sehen welche Input-Variablen relevant sind, kann das Spearman Schaubild weiterhelfen.
 
+Daten sind untereinander kaum Abhängig, bis auf Kauf- und Verkaufspreis
+
 ```{r spearman_analysis}
 df_train %>% 
   select(where(is.numeric), -more_sells, -profit, -unit_price_gold_diff) %>% # only select numerical data
@@ -458,10 +467,11 @@ plot(hc)
 ## Clusteranalyse II
 
 Es wurden vier Cluster gebildet:
-- Das "(1) rote" Cluster sind günstige Gegenstände mit Verlust (nicht kaufen)
-- Das "(2) grüne" Cluster sind mittelpreisige Gegenstände mit unterschiedlichem Gewinn (nicht kaufen)
-- Das "(3) hellblaue" Cluster sind günstige Gegenstände mit überwiegend hohem Gewinn (sollte man kaufen)
-- Das "(4) lila" cluster sind hochpreisige Gegenstände mit hohem Gewinn (könnte man kaufen)
+
+- (1) Rote Cluster: Günstige Gegenstände mit Verlust (nicht kaufen) 
+- (2) Grüne Cluster: Mittelpreisige Gegenstände mit unterschiedlichem Gewinn (nicht kaufen) 
+- (3) Hellblaue Cluster: Günstige Gegenstände mit überwiegend hohem Gewinn (sollte man kaufen) 
+- (4) Lila Cluster: Hochpreisige Gegenstände mit hohem Gewinn (könnte man kaufen)
 
 Es gibt also einige Gegenstände die für uns interessant sind.
 
@@ -521,7 +531,7 @@ summary(sells_rec)
 
 ## Modell aufbauen
 
-Ich habe zwei verschiedene Regressionsalgorithmen ausprobiert. Den Regression des `Random Forest` und die Lasso-Regressions von `glm` bzw. `glmnet`. Das Rezept dazu sieht folgendermaßen aus:
+Ich habe zwei verschiedene Regressionsalgorithmen ausprobiert. Die Regression des `Random Forest` und die Lasso-Regressions von `glm` bzw. `glmnet`. Das Rezept dazu sieht folgendermaßen aus:
 
 ```{#mycode .R .numberLines}
 sells_rec <- 
@@ -731,6 +741,8 @@ Finanziell hat sich das natürlich nicht gelohnt, aber es war eine interessante 
 
 ## Fazit
 
-The dataset behaved very differently than I thought. There is a lot of data but the really relevant parts are only highest sell and lowest buy prices.
-Auctions are changing so fast that static analysis isn't a good fit. After creating an auction it didn't take long until others were undercutting my prices.
-Therefore I was not able to reach my gold of earning `18 gold and 6 silver (worth 1$)`. There are still some running auctions but after all I even have `1 gold 43 silver and 56 copper` less. In addition, this method is really time consuming checking auctions now and then, and it doesn't really spark joy. It's clear that I'm not the first and only one who tries to earn money that way, which gets obvious when looking at existing fan pages like [GW2Efficiency](https://gw2efficiency.com/tradingpost) and [GW2TP](https://de.gw2tp.com/).
+- Datenset hat sich ganz anderst verhalten als gedacht
+- Auktionen ändern sich extrem schnell, sodass eine statische Analyse wenig sinnvoll ist
+- Andere unterbieten die eingestellten Preise sehr schnell
+- Die Methode benötigt viel Zeit und macht wenig Spaß
+- Ich bin nicht der erste und einzige der so Auktionen einstellt, das sieht man auch an den existierenden Fan-Seiten [GW2Efficiency](https://gw2efficiency.com/tradingpost) oder [GW2TP](https://de.gw2tp.com/)
