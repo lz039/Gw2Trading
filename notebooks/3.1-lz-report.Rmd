@@ -1,6 +1,6 @@
 ---
 title: "Insights in the economy of an Massively Multiplayer Online Role-Playing Game"
-author: "Lukas Zaiser"
+author: "by Lukas Zaiser"
 params: 
  institute: "HdM Stuttgart"
  country: "Germany"
@@ -51,7 +51,7 @@ source("../libs/prepare_data.R")
 tidymodels_prefer()
 ```
 
-```{r css-operations, message=FALSE, warning=FALSE}
+```{r css-operations, message=FALSE, warning=FALSE, include=FALSE}
 knitr::opts_chunk$set(class.source = "code-chunks")
 ```
 
@@ -95,8 +95,6 @@ Because of that it's important to find items where the buy-to-sell price ratio i
 In addition, as we buy **and** sell, we have to pay the whole 15% taxes which lowers our revenue.
 
 Here is one example:
-
-This is how it works:
 
 1. We want to buy an item so we create a new order with the highest order price (say: 1 gold)
 2. As soon as another player wants to sell this item, the player will sell it to us (for 1 gold)

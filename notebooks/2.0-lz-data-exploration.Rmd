@@ -8,7 +8,6 @@ params:
  data_date: "2022-04-01"
 output:
  html_document: 
-  css: style.css # define your own css
   df_print: paged #  tables are printed as HTML tables 
   highlight: default # syntax highlighting style 
   number_sections: yes # numbering of sections
@@ -19,8 +18,6 @@ output:
   toc_float: 
     collapsed: true # show full toc
     smooth_scroll: true # toc scrolling behavior
-  includes:
-    after_body: footer.html # include footer
 ---
 
 ```{r init, message=FALSE, warning=FALSE, include=FALSE}

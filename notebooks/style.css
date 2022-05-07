@@ -1,8 +1,17 @@
 h1, h2, h3 {
   text-align: center;
+  color: black;
 }
 
-<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Code+Pro:wght@300">
+p {
+  font-size: 16px;
+  color: black;
+}
+
+.author {
+  text-align: center;
+  color: black;  
+}
 
 .code-chunks {
   font-family: "Source+Code+Pro:wght@300";

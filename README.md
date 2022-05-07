@@ -57,4 +57,4 @@ docker run -p 8080:8080 -d gw2trading
 Careful, there is zero security! ;)
 
 It's also possible to deploy the image to a destination of choice.
-I deployed it: [here](http://20.23.97.43:8080/)
+I deployed it: [here](http://20.23.97.43:8080/) (may take some time to load first time because of container warm-up)
