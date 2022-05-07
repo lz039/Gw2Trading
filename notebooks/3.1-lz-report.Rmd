@@ -321,18 +321,6 @@ data_split <- initial_split(df_all,
 # Create dataframes for the two sets:
 train_data <- training(data_split) 
 test_data <- testing(data_split)
-```
-
-We also create a validation set using the CV_fold method that is used during modeling.
-
-### >TODO: use cs_folds somewhere ??
-
-```{r create_cv_folds}
-cv_folds <- 
-  vfold_cv(train_data,
-           v=5,
-           strata = profit,
-           breaks = 4)
 
 df_train <- train_data 
 ```

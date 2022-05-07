@@ -3,15 +3,12 @@
 #    http://shiny.rstudio.com/
 #
 
+# NOTE: If this project does not run because of package conflicts, you have to restart R session.
+
 library(shiny)
 library(shinydashboard)
-library(dplyr)
-library(dbplyr)
-library(purrr)
-library(htmltools)
-library(tidyverse)
-library(readr)
 library(plotly)
+library(dplyr)
 
 dir <- getwd()
 date <- "2022-04-01"
@@ -238,7 +235,7 @@ server <- function(input, output) {
     geom_bar(aes(x = type, y = n, fill = type), stat='identity') +
     theme(axis.text.x = element_text(angle = 45, hjust=1), legend.position="bottom") +
     labs(title = "Type distribution", subtitle = "of all types", fill = "Types",
-         x = "Type", y = "Count", caption = paste("Data from", params$data_date))
+         x = "Type", y = "Count")
   
    ggplotly(types_plot)
   })
@@ -259,7 +256,7 @@ server <- function(input, output) {
       #facet_grid(df_item_types$type) +
       theme(axis.text.x = element_text(angle = 90, vjust = 0.3, hjust=1)) +
       labs(title = "Detailed item types", subtitle = "Split by armors and weapons", fill = "Item weight",
-           x = "Item types", y = "Count", caption = paste("Data from", params$data_date))
+           x = "Item types", y = "Count")
     
     types_plot_details <- ggplotly(types_plot_details)
   })

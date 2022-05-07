@@ -134,21 +134,3 @@ library(readr)
   write_csv(price_list_sells, file = paste(dir, "/../data/raw/gw2-all-sells-raw-", date, ".csv", sep = ""))
   write_csv(item_list, file = paste(dir, "/../data/raw/gw2-all-items-raw-", date, ".csv", sep = ""))
 ```
-
-
-Create full lists by raw csvs
-
-```{r load_data_test }
-dir <- getwd()
-date <- "2022-04-01"
-
-price_list_buys <- read.csv(paste(dir, "/../data/raw/gw2-all-buys-raw-", date, ".csv", sep = ""))
-price_list_sells <- read.csv(paste(dir, "/../data/raw/gw2-all-sells-raw-", date, ".csv", sep = ""))
-item_list <- read.csv(paste(dir, "/../data/raw/gw2-all-items-raw-", date, ".csv", sep = ""))
-
-item_list_buys <- item_list %>% left_join(price_list_buys)
-item_list_sells <- item_list %>% left_join(price_list_sells)
-  
-rm(dir)
-```
-

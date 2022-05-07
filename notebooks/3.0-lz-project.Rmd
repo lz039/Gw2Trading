@@ -137,13 +137,10 @@ Which features could be created in addition?
 2. What is the `return of investment (ROI)`, taking initial costs into account
 3. One interesting number is the `relative estimation window` between high and low estimates (or in our case, orders/offers) taken from [this book](https://islandora.wrlc.org/islandora/object/1112capstones%3A217/datastream/PDF/view). If the variance is 0, this values would be 1. If the prices are very different, this value will raise.
 
-## [WIP] Define Metrics
+## Define Metrics
 
 The goal is to earn at least `18 gold and 6 silver` just by buying/selling items that the exploration/model rates as highest ROI.
 This is the current values of `1$`.
-
-
-TODO: Add metrics for the model
 
 # Data
 
@@ -519,7 +516,7 @@ df_all %>%
   )
 ```
 
-## [WIP] Split data
+## Split data
 
 To make the data split reproducible, we set a seed.
 
@@ -537,16 +534,6 @@ data_split <- initial_split(df_all,
 # Create dataframes for the two sets:
 train_data <- training(data_split) 
 test_data <- testing(data_split)
-```
-
-Create validation set (used during modeling)
-
-```{r create_cv_folds}
-cv_folds <- 
-  vfold_cv(train_data,
-           v=5,
-           strata = profit,
-           breaks = 4)
 
 df_train <- train_data 
 ```
