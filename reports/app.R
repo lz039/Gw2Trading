@@ -11,6 +11,7 @@ library(purrr)
 library(htmltools)
 library(tidyverse)
 library(readr)
+library(plotly)
 
 dir <- getwd()
 date <- "2022-04-01"
@@ -75,7 +76,7 @@ ui <- dashboardPage(
         ),
         tabPanel(
           title = "Model Dashboard",
-          value = "page3",
+          value = "page2",
           fluidRow(
             column(
               width = 12,
@@ -85,13 +86,27 @@ ui <- dashboardPage(
           fluidRow(
             column(
               width = 12,
-              plotOutput("plot_model")
+              plotlyOutput("plot_model")
             )
           ),
           fluidRow(
             column(12,
                    sliderInput("prediction_range", h3("Prediction in gold"), 
                                min = 0, max = round(max(sells_lasso_aug$.pred), 0), value = c(0, round(max(sells_lasso_aug$.pred), 0)), step = 1)
+            )
+          )
+        ),
+        tabPanel(
+          title = "Data exploration",
+          value = "page3",
+          fluidRow(
+            column(
+              width = 6,
+              plotlyOutput("type_plot_details")
+            ),
+            column(
+              width = 6,
+              plotlyOutput("type_plot")
             )
           )
         )
@@ -191,17 +206,67 @@ server <- function(input, output) {
       subset((rf_pred) >= input$prediction_range[1] & (rf_pred) <= input$prediction_range[2]) %>% 
       subset((lasso_pred) >= input$prediction_range[1] & (lasso_pred) <= input$prediction_range[2])
       
-    sells_join_aug %>%  
+    ggplotly(sells_join_aug %>%  
       ggplot() +
       geom_point(aes(x = rf_pred, y = unit_price_gold_sells), color = "#05541a") +
       geom_point(aes(x = lasso_pred, y = unit_price_gold_sells), color = "#040552") +
       geom_abline(col = "red", lty = 2) +
       labs(x = "Prediction", y = "Gold value",
            title = "Item price predictions", subtitle = "Using random forest (green) and lasso regressions (blue)",
-           color = c("A", "B"))
+           color = c("A", "B")))
   })
     
-  output$plot_model <- renderPlot(plot_model())
+  output$plot_model <- renderPlotly(plot_model())
+  
+  # Type distribution
+  types_plot <- reactive({ 
+    df_types <- df %>% 
+    distinct(type, name) %>%
+    group_by(type) %>% 
+    count(type)
+   
+    if (input$type_input != "All"){
+      df_types <- df_types %>% subset(type == input$type_input)
+    }
+    else
+    {
+      df_types <- df_types
+    }
+  
+  types_plot <- df_types %>% 
+    ggplot() +
+    geom_bar(aes(x = type, y = n, fill = type), stat='identity') +
+    theme(axis.text.x = element_text(angle = 45, hjust=1), legend.position="bottom") +
+    labs(title = "Type distribution", subtitle = "of all types", fill = "Types",
+         x = "Type", y = "Count", caption = paste("Data from", params$data_date))
+  
+   ggplotly(types_plot)
+  })
+  
+  output$type_plot <- renderPlotly(types_plot())
+  
+  # Detailed type distribution
+  types_plot_details <- reactive({ 
+    df_item_types <- df %>% 
+    filter(type %in% c("Armor", "Weapon")) %>% 
+    distinct(type, item_type, item_weight_class, name) %>%
+    group_by(type, item_type, item_weight_class) %>% 
+    count(item_type)
+
+    types_plot_details <- df_item_types %>% 
+      ggplot() +
+      geom_bar(aes(x = item_type, y = n, fill = item_weight_class), stat='identity') +
+      #facet_grid(df_item_types$type) +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.3, hjust=1)) +
+      labs(title = "Detailed item types", subtitle = "Split by armors and weapons", fill = "Item weight",
+           x = "Item types", y = "Count", caption = paste("Data from", params$data_date))
+    
+    types_plot_details <- ggplotly(types_plot_details)
+  })
+  
+  output$type_plot_details <- renderPlotly(types_plot_details())
+  
+  rm(df_item_types)
 }
 
 shinyApp(ui = ui, server = server)
