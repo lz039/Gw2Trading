@@ -697,7 +697,7 @@ We can now try to use a whole new dataset and let the model run on that one.
 
 ```{r load_csv_2, message=FALSE, warning=FALSE}
 dir <- getwd()
-date <- "2022-04-06"
+date <- "2022-05-07"
 
 price_list_buys <- read.csv(paste(dir, "/../data/raw/gw2-all-buys-raw-", date, ".csv", sep = ""))
 price_list_sells <- read.csv(paste(dir, "/../data/raw/gw2-all-sells-raw-", date, ".csv", sep = ""))
