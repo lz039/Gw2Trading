@@ -618,7 +618,7 @@ set.seed(1234)
 
 sells_boot <- bootstraps(df_train)
 
-tune_spec <- linear_reg(penalty = tune(), mixture = tune()) %>%
+tune_spec <- linear_reg(penalty = tune(), mixture = 1) %>%
   set_engine("glmnet")
 
 lambda_grid <- grid_regular(penalty(), levels = 50)
