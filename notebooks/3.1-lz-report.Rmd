@@ -420,9 +420,10 @@ Because we scaled the numbers we can't really say something about the real value
 Four clusters were created out of the data:
 
 - The "(1) red" cluster are low-cost items with low profit (don't buys)
-- The "(2) green" cluster are mid-cost items with different profit
-- The "(3) teal" cluster are low-cost items with mostly high profit (should buys)
-- The "(4) purple" cluster are high-cost items with high profit (could buys)
+- The "(2) yellow" cluster are mid-cost items with different profit (don't buys) 
+- The "(3) green" cluster are low-cost items with different profit (don't buys)
+- The "(4) teal" cluster are high-cost items with moderate profit (could buys)
+- The "(5) purple" cluster are low-cost items with high profit (must buys)
 
 > The profit is not a question of buy costs, there are items with high profit for low and for high costs. 
 
@@ -615,7 +616,7 @@ set.seed(1234)
 
 sells_boot <- bootstraps(df_train)
 
-tune_spec <- linear_reg(penalty = tune(), mixture = tune()) %>%
+tune_spec <- linear_reg(penalty = tune(), mixture = 1) %>%
   set_engine("glmnet")
 
 lambda_grid <- grid_regular(penalty(), levels = 50)
