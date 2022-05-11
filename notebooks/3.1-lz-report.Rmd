@@ -392,16 +392,13 @@ plot(hc)
 ```
 
 The dendrogram displays the number of clusters. The higher the height on y-axis, the less similar are the clusters to each other.
-Because there is a big gap between ~ 5 and ~ 10 which would result in only two clusters, four clusters seem fine.
+Because there is a big gap between ~ 5 and ~ 10 which would result in only two clusters, five clusters seem fine.
 
-We can also try six clusters, as two of the clusters seem to be pretty small.
-
-
-```{r plot_items_clustered_4}
+```{r plot_items_clustered_5}
 
 hc$labels <- df_cl$id
 
-grp <- cutree(hc, k = 4) 
+grp <- cutree(hc, k = 5) 
 df_cl$cluster <- grp
 
 df_cl %>% 
@@ -666,11 +663,11 @@ sells_join_aug <- sells_lasso_aug %>%
 
 sells_join_aug %>%  
   ggplot() +
-  geom_point(aes(x = rf_pred, y = unit_price_gold_sells), color = "#05541a") +
-  geom_point(aes(x = lasso_pred, y = unit_price_gold_sells), color = "#040552") +
+  geom_point(aes(x = rf_pred, y = unit_price_gold_sells), color = "#11ff00") +
+  geom_point(aes(x = lasso_pred, y = unit_price_gold_sells), color = "#ff0000") +
   geom_abline(col = "red", lty = 2) +
   labs(x = "Predicted buy value", y = "Buy value",
-       title = "Item price predictions", subtitle = "Using random forest (green) and lasso regressions (blue)",
+       title = "Item price predictions", subtitle = "Using random forest (green) and lasso regressions (red)",
        color = c("A", "B"),
        caption = paste("Data from", params$data_date))
 ```
